@@ -53,7 +53,10 @@ function errText(err: unknown): string {
  *  RESOURCE_EXHAUSTED / "quota" / "rate limit"), as opposed to a real bug. */
 export function isRateLimitError(err: unknown): boolean {
   if (errStatus(err) === 429) return true
-  return /rate.?limit|too many requests|resource[_ ]?exhausted|exceeded your (?:current )?quota|quota (?:exceeded|exhausted)|\b429\b/i.test(
+  // Also treat per-minute token limits ("TPM", "request too large … tokens per
+  // minute", "reduce your message size") as rate-limit-class — these are free-tier
+  // throughput caps (e.g. Groq's 8000 TPM) that clear after a short wait.
+  return /rate.?limit|too many requests|resource[_ ]?exhausted|exceeded your (?:current )?quota|quota (?:exceeded|exhausted)|tokens per minute|\bTPM\b|request too large|reduce your message size|\b429\b/i.test(
     errText(err)
   )
 }

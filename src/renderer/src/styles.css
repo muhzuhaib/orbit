@@ -4939,9 +4939,40 @@ button svg.icon {
 .compare-head {
   flex-wrap: wrap;
   row-gap: 8px;
+  /* Reserve room for the frameless window controls. NOTE: this MUST live after
+     `.chat-toolbar { padding: 10px 16px }` (which is later in this file and would
+     otherwise reset padding-right back to 16px via the shorthand) — that override
+     is why the token counter kept hiding behind the min/max/close buttons. */
+  padding-right: 160px;
 }
 .page-head-row {
   padding-right: 150px;
+}
+
+/* ---- Smoother sidebar collapse/expand (match Qwen's feel) ----
+   The old animation just shrank the sidebar's width while its contents stayed
+   fully opaque, so the text visibly got crushed/clipped against the closing edge
+   — that's what read as "bad". Qwen fades the sidebar CONTENTS out as the panel
+   narrows (and fades them back in slightly after it re-opens), so you never see
+   squished text. We match that: a snappy ease-out width, plus an opacity fade on
+   the sidebar's children — quick on collapse, gently delayed on expand. */
+.sidebar {
+  transition: width 0.3s cubic-bezier(0.22, 1, 0.36, 1),
+    padding 0.3s cubic-bezier(0.22, 1, 0.36, 1), border-color 0.3s ease;
+}
+.sidebar > * {
+  /* expand: fade in after the panel has started opening */
+  transition: opacity 0.22s ease 0.1s;
+}
+.sidebar.hidden > * {
+  /* collapse: fade out fast so content is gone before the width finishes closing */
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.14s ease;
+}
+/* Smoothly slide the content gutter instead of snapping it. */
+.content {
+  transition: padding-left 0.3s cubic-bezier(0.22, 1, 0.36, 1);
 }
 
 /* ---- #9: Data & privacy (backup / restore / delete-all) ---- */

@@ -1096,8 +1096,8 @@ export default function ChatsView({
           {error && (
             <div className="chat-error">
               ⚠{' '}
-              {/rate.?limit|too many requests|resource[_ ]?exhausted|quota|\b429\b/i.test(error)
-                ? 'This model is rate-limited or has hit its free-tier quota. Wait a minute and retry, or switch to another model in the picker above.'
+              {/rate.?limit|too many requests|resource[_ ]?exhausted|quota|tokens per minute|\bTPM\b|request too large|reduce your message size|\b429\b/i.test(error)
+                ? 'This model is rate-limited or the request is too large for its free-tier per-minute limit. Wait a minute and retry, start a new chat to shrink the context, or switch to another model.'
                 : error}
               <button className="ghost small" onClick={regenerate}>
                 ↻ Retry

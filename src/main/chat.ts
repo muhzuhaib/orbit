@@ -742,6 +742,12 @@ async function run(sender: WebContents, conversationId: string): Promise<void> {
       system,
       messages: conv.messages.map(toModelMessage),
       abortSignal: controller.signal,
+      // Give reasoning models room to BOTH think and answer. Without this, the
+      // provider's low default output cap (often ~2048) is spent entirely on the
+      // hidden reasoning, so the model never emits a final answer (the dreaded
+      // "empty reply"). 4096 is safe across providers (≥ every model's max
+      // completion floor, e.g. Anthropic Haiku's 4096) and plenty for a chat turn.
+      maxOutputTokens: 4096,
       ...(providerOptions ? { providerOptions } : {}),
       // When web search is on, keep the step ceiling low: combined with the
       // MAX_WEB_SEARCHES cap this stops a model looping on searches and eating
@@ -782,9 +788,15 @@ async function run(sender: WebContents, conversationId: string): Promise<void> {
       usage.outputTokens && elapsedSec > 0.05
         ? Math.round(usage.outputTokens / elapsedSec)
         : undefined
+    // Safety net: if the model produced ONLY hidden reasoning and no visible
+    // answer (it ran out of output budget mid-thought), don't show a blank reply.
+    const visible =
+      full.trim() || !reasoningFull.trim()
+        ? full
+        : '_(This model used its whole response on hidden reasoning without writing a final answer. Try again, lower the Thinking effort, or ask it to answer directly.)_'
     const message: ChatMessage = {
       role: 'assistant',
-      content: full,
+      content: visible,
       reasoning: reasoningFull || undefined,
       model: `${conv.providerId}/${conv.modelId}`,
       usage: { inputTokens: usage.inputTokens, outputTokens: usage.outputTokens },
