@@ -15,6 +15,26 @@ protocol.registerSchemesAsPrivileged([
 // The primary window, tracked so the auto-updater can push status to the renderer.
 let mainWindow: BrowserWindow | null = null
 
+// Single-instance lock. Without this, an auto-update restart (or the user
+// clicking the Start-menu icon a few times) can spawn several copies of Orbit
+// that pile up as hidden, windowless processes and stop any of them showing a
+// window. When we're the second instance we quit immediately and instead
+// surface the window that's already running.
+const isPrimaryInstance = app.requestSingleInstanceLock()
+if (!isPrimaryInstance) {
+  app.quit()
+} else {
+  app.on('second-instance', () => {
+    if (mainWindow) {
+      if (mainWindow.isMinimized()) mainWindow.restore()
+      mainWindow.show()
+      mainWindow.focus()
+    } else {
+      createWindow()
+    }
+  })
+}
+
 function createWindow(): void {
   const win = new BrowserWindow({
     width: 1280,
@@ -73,6 +93,9 @@ function createWindow(): void {
 }
 
 app.whenReady().then(() => {
+  // Lost the single-instance race — the primary copy is already running, so do
+  // nothing here (app.quit() was already called above).
+  if (!isPrimaryInstance) return
   // must run before anything reads config/secrets/model cache
   migrateOllamaCloud()
   migrateGroq()
