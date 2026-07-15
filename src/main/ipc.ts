@@ -41,6 +41,7 @@ import * as skills from './skills'
 import { exportMarkdownToOffice } from './office'
 import { setArtifact } from './artifacts'
 import { getMemory, setMemory } from './memory'
+import { exportBackup, restoreBackup, deleteAllData } from './backup'
 import { verifyAnswer } from './verify'
 import type { VerifyInput } from '../shared/types'
 import { writeFileSync } from 'fs'
@@ -283,6 +284,18 @@ export function registerIpc(): void {
   // Persistent memory
   ipcMain.handle('memory:get', () => getMemory())
   ipcMain.handle('memory:set', (_e, content: string) => setMemory(content))
+
+  // Data & privacy: encrypted backup / restore / delete-all (issue #9)
+  ipcMain.handle('data:backup', (e, password: string) =>
+    exportBackup(BrowserWindow.fromWebContents(e.sender), password)
+  )
+  ipcMain.handle('data:restore', (e, password: string) =>
+    restoreBackup(BrowserWindow.fromWebContents(e.sender), password)
+  )
+  ipcMain.handle('data:delete-all', () => {
+    deleteAllData()
+    return true
+  })
 
   // Skills
   ipcMain.handle('skills:list', () => skills.listSkills())

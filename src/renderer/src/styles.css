@@ -4720,3 +4720,263 @@ button svg.icon {
   padding-top: 5px;
   padding-bottom: 5px;
 }
+
+/* ============================================================
+   2026-07 UX batch (issues #1, #4, #5, #6, #10)
+   ============================================================ */
+
+/* ---- #6: themed in-app confirm / alert dialog (replaces native Windows boxes) ---- */
+.confirm-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 5vh 20px;
+  z-index: 200;
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+.confirm-backdrop.open {
+  opacity: 1;
+}
+.confirm-modal {
+  width: 100%;
+  max-width: 430px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  box-shadow: 0 24px 70px var(--shadow);
+  padding: 22px 22px 18px;
+  transform: translateY(10px) scale(0.98);
+  opacity: 0;
+  transition: transform 0.22s cubic-bezier(0.22, 1, 0.36, 1), opacity 0.2s ease;
+}
+.confirm-backdrop.open .confirm-modal {
+  transform: translateY(0) scale(1);
+  opacity: 1;
+}
+.confirm-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+}
+.confirm-icon {
+  flex-shrink: 0;
+  width: 34px;
+  height: 34px;
+  border-radius: 9px;
+  display: grid;
+  place-items: center;
+  font-size: 18px;
+  background: var(--bg-hover);
+  color: var(--text-dim);
+}
+.confirm-icon.danger {
+  background: rgba(192, 82, 77, 0.14);
+  color: #e8918d;
+}
+.confirm-title {
+  font-size: 15px;
+  font-weight: 650;
+  color: var(--text);
+  line-height: 1.4;
+  padding-top: 5px;
+}
+.confirm-detail {
+  color: var(--text-dim);
+  font-size: 13px;
+  line-height: 1.55;
+  margin: 12px 2px 0;
+}
+.confirm-input {
+  width: 100%;
+  margin-top: 16px;
+  background: var(--bg-sidebar);
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  color: var(--text);
+  padding: 10px 12px;
+  font-size: 14px;
+  font-family: inherit;
+  box-sizing: border-box;
+}
+.confirm-input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+.confirm-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 20px;
+}
+.confirm-cancel,
+.confirm-ok {
+  border-radius: 9px;
+  padding: 8px 16px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  border: 1px solid var(--border);
+  font-family: inherit;
+}
+.confirm-cancel {
+  background: transparent;
+  color: var(--text);
+}
+.confirm-cancel:hover {
+  background: var(--bg-hover);
+}
+.confirm-ok {
+  background: var(--accent);
+  color: var(--bg);
+  border-color: transparent;
+}
+.confirm-ok:hover {
+  filter: brightness(1.08);
+}
+.confirm-ok.danger {
+  background: #c0524d;
+  color: #fff;
+}
+.confirm-ok.danger:hover {
+  filter: brightness(1.08);
+}
+
+/* ---- #4: landing thinking-level popover (Off / Low / Medium / High) ---- */
+.landing-think {
+  position: relative;
+  display: inline-flex;
+}
+.landing-think-pop {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: 0 10px 30px var(--shadow);
+  padding: 6px;
+  min-width: 132px;
+  z-index: 60;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  animation: modal-in 0.16s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+.landing-think-label {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-dim);
+  padding: 4px 8px 2px;
+}
+.landing-think-opt {
+  text-align: left;
+  background: transparent;
+  border: none;
+  color: var(--text);
+  padding: 7px 10px;
+  border-radius: 8px;
+  font-size: 13px;
+  cursor: pointer;
+  font-family: inherit;
+}
+.landing-think-opt:hover {
+  background: var(--bg-hover);
+}
+.landing-think-opt.sel {
+  color: var(--accent);
+  font-weight: 600;
+}
+
+/* ---- #10: subtle "try a stronger model for web research" note ---- */
+.search-model-note {
+  margin-top: 10px;
+  padding: 9px 12px;
+  border-radius: 10px;
+  background: var(--bg-sidebar);
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+.search-model-note strong {
+  color: var(--text);
+}
+
+/* ---- #5: section-landing buttons keep readable labels on hover + smoother,
+   slower motion (was too fast, and some hover states dimmed the text) ---- */
+.section-example-chip {
+  transition: transform 0.24s cubic-bezier(0.22, 1, 0.36, 1), background 0.24s ease,
+    border-color 0.24s ease, color 0.24s ease;
+}
+.section-example-chip:hover:not(:disabled) {
+  color: var(--text);
+}
+.section-recent-item {
+  transition: border-color 0.24s cubic-bezier(0.22, 1, 0.36, 1), background 0.24s ease,
+    transform 0.24s ease;
+}
+.section-recent-item:hover {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+.section-cta {
+  transition: transform 0.24s cubic-bezier(0.22, 1, 0.36, 1), filter 0.24s ease,
+    box-shadow 0.24s ease;
+}
+
+/* ---- #1: keep top-bar content clear of the frameless window controls ----
+   The chat toolbar / compare header can hold many controls; let them wrap onto a
+   second row instead of tucking the last item under the min/max/close buttons.
+   The Providers page header's "Re-check models" button gets right clearance too. */
+.chat-toolbar,
+.compare-head {
+  flex-wrap: wrap;
+  row-gap: 8px;
+}
+.page-head-row {
+  padding-right: 150px;
+}
+
+/* ---- #9: Data & privacy (backup / restore / delete-all) ---- */
+.data-privacy-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+.data-danger {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-top: 16px;
+  padding: 14px 16px;
+  border: 1px solid rgba(192, 82, 77, 0.4);
+  border-radius: 12px;
+  background: rgba(192, 82, 77, 0.06);
+}
+.data-danger-text {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  flex: 1;
+  min-width: 0;
+}
+.data-danger-text strong {
+  color: var(--text);
+  font-size: 13.5px;
+}
+.data-danger-text span {
+  color: var(--text-dim);
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+.data-danger .danger {
+  flex-shrink: 0;
+}

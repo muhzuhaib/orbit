@@ -241,3 +241,20 @@ export function deleteKey(providerId: string): void {
   delete secrets[providerId]
   writeSecrets(secrets)
 }
+
+/** All API keys as plaintext (for an encrypted, portable backup). The on-disk
+ *  form is machine-bound via safeStorage, so a backup must carry the decrypted
+ *  keys, re-encrypted under the user's backup password by the backup layer. */
+export function exportSecrets(): Record<string, string> {
+  const out: Record<string, string> = {}
+  for (const id of Object.keys(readSecrets())) {
+    const k = getKey(id)
+    if (k) out[id] = k
+  }
+  return out
+}
+
+/** Re-encrypt restored plaintext keys with this machine's safeStorage. */
+export function importSecrets(map: Record<string, string>): void {
+  for (const [id, key] of Object.entries(map)) if (key) setKey(id, key)
+}

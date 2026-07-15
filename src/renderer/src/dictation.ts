@@ -7,6 +7,7 @@
 // to the main process, which transcribes it with a Gemini model (see
 // main/chat.ts transcribeAudio). This actually works with the user's own key.
 import { useRef, useState } from 'react'
+import { alertDialog } from './confirm'
 
 export type DictationState = 'idle' | 'recording' | 'transcribing'
 
@@ -127,9 +128,9 @@ export function useDictation(onText: (text: string) => void): {
       const wav = encodeWavDataUrl(downsample(flat, rate, TARGET_RATE), TARGET_RATE)
       const res = await window.api.chat.transcribe(wav)
       if (res.text) onText(res.text)
-      else if (res.error) alert(`Dictation failed: ${res.error}`)
+      else if (res.error) void alertDialog('Dictation failed', res.error)
     } catch {
-      alert('Dictation failed while transcribing the audio.')
+      void alertDialog('Dictation failed while transcribing the audio.')
     }
     setState('idle')
   }
@@ -160,7 +161,7 @@ export function useDictation(onText: (text: string) => void): {
         ref.current = { stream, ctx, source, processor, mute, chunks }
         setState('recording')
       } catch {
-        alert('Could not access the microphone. Please allow microphone access and try again.')
+        void alertDialog('Could not access the microphone. Please allow microphone access and try again.')
         setState('idle')
       }
     })()

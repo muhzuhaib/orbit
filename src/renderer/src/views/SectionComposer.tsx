@@ -8,6 +8,7 @@
 import { useEffect, useRef, useState } from 'react'
 import type { ChatAttachment } from '../../../shared/types'
 import { AttachIcon, MicIcon, SendIcon, StopIcon, WorkingDots } from './Icons'
+import { alertDialog } from '../confirm'
 
 /** Fold attached document text (and a note for images) into the outgoing prompt. */
 export function promptWithAttachments(text: string, attachments: ChatAttachment[]): string {
@@ -73,7 +74,7 @@ export function SectionComposer({
   const SpeechRec = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition
   const toggleDictation = () => {
     if (!SpeechRec) {
-      alert('Voice dictation is not available in this build.')
+      void alertDialog('Voice dictation is not available in this build.')
       return
     }
     if (listening) {

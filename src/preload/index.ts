@@ -157,6 +157,15 @@ const api = {
     set: (content: string): Promise<void> => ipcRenderer.invoke('memory:set', content)
   },
 
+  // Encrypted backup / restore + delete-all of personal data (issue #9)
+  data: {
+    backup: (password: string): Promise<{ ok: boolean; path?: string; error?: string }> =>
+      ipcRenderer.invoke('data:backup', password),
+    restore: (password: string): Promise<{ ok: boolean; error?: string }> =>
+      ipcRenderer.invoke('data:restore', password),
+    deleteAll: (): Promise<boolean> => ipcRenderer.invoke('data:delete-all')
+  },
+
   projects: {
     list: (): Promise<ProjectMeta[]> => ipcRenderer.invoke('projects:list'),
     get: (id: string): Promise<Project> => ipcRenderer.invoke('projects:get', id),

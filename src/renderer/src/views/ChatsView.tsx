@@ -14,8 +14,8 @@ import type {
 } from '../../../shared/types'
 import 'highlight.js/styles/github-dark.css'
 import ModelSelect from './ModelSelect'
-import { ThinkingSelect } from './ThinkingSelect'
-import { supportsThinking } from '../../../shared/modelCatalog'
+import { ThinkingSelect, type Effort } from './ThinkingSelect'
+import { supportsThinking, classifyModel } from '../../../shared/modelCatalog'
 import { estimateCost, formatCost } from '../../../shared/modelPricing'
 import { useBetaFlag } from '../betaFlags'
 import {
@@ -32,6 +32,7 @@ import {
   type Difficulty
 } from '../autopilot'
 import { pickDefaultModel, setLastModel } from '../prefs'
+import { confirmDialog } from '../confirm'
 import { useDictation } from '../dictation'
 import {
   AttachIcon,
@@ -179,6 +180,21 @@ function renderReply(content: string): JSX.Element[] {
     }
   }
   return out
+}
+
+// While a reply is still streaming, long raw URLs (especially Google-News
+// redirect links) briefly appear before the model finishes the `](…)` and
+// markdown collapses them into a named link. Replace any long bare URL with a
+// tidy "🔗 hostname" chip for the streaming view only — the final render uses
+// the stored message content, so the real links come back once the reply lands.
+function collapseStreamingUrls(text: string): string {
+  return text.replace(/https?:\/\/[^\s)<>]{28,}/g, (url) => {
+    try {
+      return `🔗 ${new URL(url).hostname.replace(/^www\./, '')}`
+    } catch {
+      return '🔗 link'
+    }
+  })
 }
 
 /** Strip ⟦tool⟧ sentinels to readable text (for copy / read-aloud / verify). */
@@ -516,7 +532,7 @@ export default function ChatsView({
   const [landingModelId, setLandingModelId] = useState('')
   // Web search / thinking chosen on the landing screen, applied to the new chat.
   const [landingWeb, setLandingWeb] = useState(false)
-  const [landingThinking, setLandingThinking] = useState(false)
+  const [landingEffort, setLandingEffort] = useState<Effort>('off')
   useEffect(() => {
     if (!defaultModel) return
     if (!landingModelId || !models.some((m) => m.id === landingModelId)) {
@@ -549,9 +565,9 @@ export default function ChatsView({
     const patch: Record<string, unknown> = {}
     if (isAuto) patch.autopilot = true
     if (landingWeb) patch.webSearch = true
-    if (landingThinking && landingCanThink) {
+    if (landingEffort !== 'off' && landingCanThink) {
       patch.thinking = true
-      patch.effort = 'medium'
+      patch.effort = landingEffort
     }
     if (Object.keys(patch).length > 0) c = await window.api.conversations.update(c.id, patch)
     if (!isAuto) setLastModel(id)
@@ -595,10 +611,10 @@ export default function ChatsView({
 
   const remove = async (id: string) => {
     const title = metas.find((m) => m.id === id)?.title || 'this chat'
-    const ok = await window.api.confirm(
-      `Delete “${title}”?`,
-      'This permanently removes the conversation and cannot be undone.'
-    )
+    const ok = await confirmDialog(`Delete “${title}”?`, {
+      detail: 'This permanently removes the conversation and cannot be undone.',
+      confirmLabel: 'Delete'
+    })
     if (!ok) return
     await window.api.conversations.delete(id)
     if (conv?.id === id) setConv(null)
@@ -636,10 +652,10 @@ export default function ChatsView({
   }
   const deleteFolder = async (id: string) => {
     const name = folders.find((f) => f.id === id)?.name || 'this folder'
-    const ok = await window.api.confirm(
-      `Delete folder “${name}”?`,
-      'The folder is removed; the chats inside it are kept and become unfiled.'
-    )
+    const ok = await confirmDialog(`Delete folder “${name}”?`, {
+      detail: 'The folder is removed; the chats inside it are kept and become unfiled.',
+      confirmLabel: 'Delete folder'
+    })
     if (!ok) return
     setFolders(await window.api.folders.delete(id))
     refreshMetas()
@@ -695,10 +711,10 @@ export default function ChatsView({
   const deleteSelected = async () => {
     const ids = [...selected]
     if (ids.length === 0) return
-    const ok = await window.api.confirm(
-      `Delete ${ids.length} chat${ids.length > 1 ? 's' : ''}?`,
-      'This permanently removes the selected conversations.'
-    )
+    const ok = await confirmDialog(`Delete ${ids.length} chat${ids.length > 1 ? 's' : ''}?`, {
+      detail: 'This permanently removes the selected conversations.',
+      confirmLabel: 'Delete'
+    })
     if (!ok) return
     await window.api.conversations.deleteMany(ids)
     if (conv && ids.includes(conv.id)) setConv(null)
@@ -708,10 +724,10 @@ export default function ChatsView({
 
   const deleteAll = async () => {
     if (metas.length === 0) return
-    const ok = await window.api.confirm(
-      `Delete all ${metas.length} chats?`,
-      'This permanently removes every conversation and cannot be undone.'
-    )
+    const ok = await confirmDialog(`Delete all ${metas.length} chats?`, {
+      detail: 'This permanently removes every conversation and cannot be undone.',
+      confirmLabel: 'Delete all'
+    })
     if (!ok) return
     await window.api.conversations.deleteAll()
     setConv(null)
@@ -968,8 +984,8 @@ export default function ChatsView({
                 webSearch={landingWeb}
                 onToggleWebSearch={() => setLandingWeb((w) => !w)}
                 canThink={landingCanThink}
-                thinking={landingThinking}
-                onToggleThinking={() => setLandingThinking((t) => !t)}
+                effort={landingEffort}
+                onEffort={setLandingEffort}
                 onSend={startChat}
                 onOpenAttachment={setPreviewAttachment}
               />
@@ -1308,7 +1324,17 @@ function Messages({
   onRegenerateWithModel: (modelId: string) => void
   onOpenAttachment: (a: ChatAttachment) => void
 }) {
-  const endRef = useRef<HTMLDivElement>(null)
+  const scrollRef = useRef<HTMLDivElement>(null)
+  // Stick-to-bottom: follow the stream ONLY while the user is already near the
+  // bottom. The moment they scroll up to read, we stop yanking them back down
+  // (matches Claude/ChatGPT). Direct scrollTop (no smooth animation) keeps the
+  // follow crisp instead of the laggy scrollIntoView-on-every-chunk it replaced.
+  const stickRef = useRef(true)
+  const onMessagesScroll = useCallback(() => {
+    const el = scrollRef.current
+    if (!el) return
+    stickRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80
+  }, [])
   const [editingIdx, setEditingIdx] = useState<number | null>(null)
   const [editText, setEditText] = useState('')
   const [regenIdx, setRegenIdx] = useState<number | null>(null)
@@ -1316,9 +1342,19 @@ function Messages({
   const [speakingIdx, setSpeakingIdx] = useState<number | null>(null)
   const [verify, setVerify] = useState<Record<number, { loading: boolean; report?: VerifyReport }>>({})
 
+  // A brand-new message (or switching chats) always snaps to the bottom.
   useEffect(() => {
-    endRef.current?.scrollIntoView({ behavior: 'auto' })
-  }, [conv.messages.length, streamText, streamReasoning])
+    stickRef.current = true
+    const el = scrollRef.current
+    if (el) el.scrollTop = el.scrollHeight
+  }, [conv.messages.length, conv.id])
+
+  // Streaming deltas only follow the bottom when the user hasn't scrolled up.
+  useEffect(() => {
+    if (!stickRef.current) return
+    const el = scrollRef.current
+    if (el) el.scrollTop = el.scrollHeight
+  }, [streamText, streamReasoning])
 
   // Stop any narration when the conversation changes or the view unmounts.
   useEffect(() => {
@@ -1378,8 +1414,20 @@ function Messages({
     return -1
   })()
 
+  // Web search on a small/"fast" model tends to return thin results. Suggest a
+  // stronger model for research once, under the latest reply (issue #10).
+  const searchRec = useMemo(() => {
+    if (!conv.webSearch || classifyModel(conv.modelId) !== 'fast') return null
+    const better = models
+      .filter((m) => classifyModel(m.modelId) !== 'fast' && m.id !== `${conv.providerId}/${conv.modelId}`)
+      .sort((a, b) => b.contextWindow - a.contextWindow)
+    // Prefer a reasoning model, else the biggest-context capable one.
+    const pick = better.find((m) => classifyModel(m.modelId) === 'thinking') ?? better[0]
+    return pick?.label ?? null
+  }, [conv.webSearch, conv.modelId, conv.providerId, models])
+
   return (
-    <div className="chat-messages">
+    <div className="chat-messages" ref={scrollRef} onScroll={onMessagesScroll}>
       {conv.messages.map((m, i) => (
         <div key={i} className={`msg msg-${m.role}`}>
           {m.role === 'user' ? (
@@ -1466,6 +1514,12 @@ function Messages({
               )}
               {renderReply(m.content)}
               {m.aborted && <div className="msg-note">stopped</div>}
+              {i === lastAssistantIdx && searchRec && (
+                <div className="search-model-note" title="Larger models generally search and synthesise the web more thoroughly.">
+                  💡 For deeper web research, a stronger model like <strong>{searchRec}</strong> usually
+                  returns fuller results.
+                </div>
+              )}
               <div className="msg-meta">
                 {m.usage && (m.usage.inputTokens != null || m.usage.outputTokens != null) && (
                   <span>
@@ -1513,6 +1567,18 @@ function Messages({
                       {a.lang === 'svg' ? '🖼 Preview SVG' : a.lang === 'html' ? '🌐 Preview' : `⌨ ${a.language ?? 'Code'}`}
                     </button>
                   ))}
+                  {m.documents?.map((d, k) => (
+                    <button
+                      key={`doc${k}`}
+                      className="ghost small"
+                      title="Reopen this document in the split-screen panel"
+                      onClick={() =>
+                        onPreview({ lang: 'html', code: d.html, title: `📄 ${d.filename}.${d.format}` })
+                      }
+                    >
+                      📄 {d.filename}.{d.format}
+                    </button>
+                  ))}
                 </span>
                 {regenIdx === i && (
                   <div className="regen-picker">
@@ -1552,12 +1618,11 @@ function Messages({
                 <div className="thinking-text live">{streamReasoning}</div>
               </details>
             )}
-            {streamText !== '' && renderReply(streamText)}
+            {streamText !== '' && renderReply(collapseStreamingUrls(streamText))}
             <WorkingDots />
           </div>
         </div>
       )}
-      <div ref={endRef} />
     </div>
   )
 }
@@ -1889,8 +1954,8 @@ function LandingComposer({
   webSearch,
   onToggleWebSearch,
   canThink,
-  thinking,
-  onToggleThinking,
+  effort,
+  onEffort,
   onSend,
   onOpenAttachment
 }: {
@@ -1900,8 +1965,8 @@ function LandingComposer({
   webSearch: boolean
   onToggleWebSearch: () => void
   canThink: boolean
-  thinking: boolean
-  onToggleThinking: () => void
+  effort: Effort
+  onEffort: (e: Effort) => void
   onSend: (text: string, attachments: ChatAttachment[]) => void
   onOpenAttachment: (a: ChatAttachment) => void
 }) {
@@ -1981,19 +2046,7 @@ function LandingComposer({
           >
             <GlobeIcon />
           </button>
-          {canThink && (
-            <button
-              className={`landing-icon-btn ${thinking ? 'on' : ''}`}
-              title={
-                thinking
-                  ? 'Extended thinking is ON — the model reasons step by step before answering'
-                  : 'Extended thinking: let the model reason step by step before answering'
-              }
-              onClick={onToggleThinking}
-            >
-              <BrainIcon />
-            </button>
-          )}
+          <LandingThinkingButton canThink={canThink} effort={effort} onEffort={onEffort} />
           <button className="landing-icon-btn" title="Attach documents or images" onClick={attach}>
             <AttachIcon />
           </button>
@@ -2024,6 +2077,75 @@ function LandingComposer({
           <SendIcon />
         </button>
       </div>
+    </div>
+  )
+}
+
+// Landing thinking control: an icon that opens a small Off/Low/Medium/High bar
+// (like the toolbar ThinkingSelect, but icon-first for the minimal landing box).
+// Greys out with an explanatory tooltip when the picked model can't reason.
+const THINK_LEVELS: Effort[] = ['off', 'low', 'medium', 'high']
+function LandingThinkingButton({
+  canThink,
+  effort,
+  onEffort
+}: {
+  canThink: boolean
+  effort: Effort
+  onEffort: (e: Effort) => void
+}): JSX.Element {
+  const [open, setOpen] = useState(false)
+  const ref = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    if (!open) return
+    const onDown = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false)
+    }
+    document.addEventListener('mousedown', onDown)
+    return () => document.removeEventListener('mousedown', onDown)
+  }, [open])
+
+  if (!canThink) {
+    return (
+      <button
+        className="landing-icon-btn"
+        disabled
+        title="This model does not support thinking mode"
+      >
+        <BrainIcon />
+      </button>
+    )
+  }
+  return (
+    <div className="landing-think" ref={ref}>
+      <button
+        className={`landing-icon-btn ${effort !== 'off' ? 'on' : ''}`}
+        title={
+          effort === 'off'
+            ? 'Extended thinking: choose how hard the model reasons before answering'
+            : `Extended thinking: ${effort}`
+        }
+        onClick={() => setOpen((o) => !o)}
+      >
+        <BrainIcon />
+      </button>
+      {open && (
+        <div className="landing-think-pop">
+          <div className="landing-think-label">Thinking</div>
+          {THINK_LEVELS.map((l) => (
+            <button
+              key={l}
+              className={`landing-think-opt ${effort === l ? 'sel' : ''}`}
+              onClick={() => {
+                onEffort(l)
+                setOpen(false)
+              }}
+            >
+              {l === 'off' ? 'Off' : l[0].toUpperCase() + l.slice(1)}
+            </button>
+          ))}
+        </div>
+      )}
     </div>
   )
 }

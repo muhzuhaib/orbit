@@ -17,7 +17,7 @@ import { exposedTools } from './mcp'
 import { enabledSkills, getSkillBody } from './skills'
 import { appendMemory, getMemory } from './memory'
 import { renderDocPreviewHtml, saveDocumentFromTool, type OfficeFormat } from './office'
-import type { DocumentPreviewEvent } from '../shared/types'
+import type { DocumentPreviewEvent, DocumentRef } from '../shared/types'
 import { getMathFormat } from './settings'
 import { mathInstruction } from '../shared/mathPrompt'
 
@@ -456,7 +456,12 @@ function stripHtml(s: string): string {
     .trim()
 }
 
-function buildToolSet(sender: WebContents, conversationId: string, webSearchOn: boolean): ToolSet {
+function buildToolSet(
+  sender: WebContents,
+  conversationId: string,
+  webSearchOn: boolean,
+  docSink: DocumentRef[]
+): ToolSet {
   const tools: ToolSet = {}
 
   // Keyless web search — available to any tool-capable model when enabled for
@@ -522,7 +527,8 @@ function buildToolSet(sender: WebContents, conversationId: string, webSearchOn: 
     description:
       'Create a real Microsoft Office file on the user\'s computer: Word (.docx), Excel (.xlsx) or PowerPoint (.pptx). ' +
       'You only provide the CONTENT as markdown — Orbit (this app) converts and saves it natively; you need no file-system access of your own. ' +
-      'ALWAYS call this tool when the user asks for a Word/Excel/PowerPoint/Office document. Never say you cannot create files. ' +
+      'Call this ONLY when the user EXPLICITLY asks for a file/document/Word/Excel/PowerPoint/spreadsheet/slide deck, or clearly wants a downloadable, savable file. ' +
+      'Do NOT create a document for an ordinary question, list, explanation, recommendation or casual/entertainment answer — just reply normally in the chat. When you do create one, never say you cannot make files. ' +
       'Formatting: for xlsx use markdown tables (each table becomes a sheet); for pptx use # or ## headings as slide titles with bullets under them; for docx use normal markdown.',
     inputSchema: jsonSchema({
       type: 'object',
@@ -544,16 +550,22 @@ function buildToolSet(sender: WebContents, conversationId: string, webSearchOn: 
       try {
         const win = BrowserWindow.fromWebContents(sender)
         const { message, filePath } = await saveDocumentFromTool(win, format, content, filename || 'document')
-        if (filePath && !sender.isDestroyed()) {
-          // show the document in the split-screen panel (like Claude Desktop)
-          const event: DocumentPreviewEvent = {
-            conversationId,
-            format,
-            filename: filename || 'document',
-            path: filePath,
-            html: await renderDocPreviewHtml(content, format, filePath)
+        if (filePath) {
+          const html = await renderDocPreviewHtml(content, format, filePath)
+          // Persist the doc on the reply so its preview reopens on click after a
+          // relaunch (was lost before — the split screen only showed live).
+          docSink.push({ format, filename: filename || 'document', path: filePath, html })
+          if (!sender.isDestroyed()) {
+            // show the document in the split-screen panel now (like Claude Desktop)
+            const event: DocumentPreviewEvent = {
+              conversationId,
+              format,
+              filename: filename || 'document',
+              path: filePath,
+              html
+            }
+            sender.send('chat:document-preview', event)
           }
-          sender.send('chat:document-preview', event)
         }
         return message
       } catch (err) {
@@ -624,11 +636,13 @@ async function run(sender: WebContents, conversationId: string): Promise<void> {
 
   const startedAt = Date.now()
   let firstTokenAt = 0
+  // Declared outside the try so the abort/catch path can attach any docs too.
+  const createdDocs: DocumentRef[] = []
 
   try {
     const model = getModel(conv.providerId, conv.modelId)
     const system = await buildSystemPrompt(conv)
-    const tools = buildToolSet(sender, conversationId, conv.webSearch ?? false)
+    const tools = buildToolSet(sender, conversationId, conv.webSearch ?? false, createdDocs)
     const hasTools = Object.keys(tools).length > 0
     const providerOptions = conv.thinking
       ? thinkingOptions(conv.providerId, conv.modelId, conv.effort ?? 'medium')
@@ -685,7 +699,8 @@ async function run(sender: WebContents, conversationId: string): Promise<void> {
       reasoning: reasoningFull || undefined,
       model: `${conv.providerId}/${conv.modelId}`,
       usage: { inputTokens: usage.inputTokens, outputTokens: usage.outputTokens },
-      tps
+      tps,
+      documents: createdDocs.length ? createdDocs : undefined
     }
     appendMessage(conversationId, message)
     emit('chat:done', { conversationId, message } satisfies ChatDoneEvent)
@@ -697,7 +712,8 @@ async function run(sender: WebContents, conversationId: string): Promise<void> {
         content: full,
         reasoning: reasoningFull || undefined,
         model: `${conv.providerId}/${conv.modelId}`,
-        aborted: true
+        aborted: true,
+        documents: createdDocs.length ? createdDocs : undefined
       }
       if (full.length > 0) appendMessage(conversationId, message)
       emit('chat:done', { conversationId, message } satisfies ChatDoneEvent)
@@ -804,6 +820,8 @@ async function buildSystemPrompt(conv: Conversation): Promise<string | undefined
   parts.push(
     'Document creation — IMPORTANT: This app (Orbit) natively creates Microsoft Office files from your markdown output; ' +
       'the app itself performs all file operations, so you always have this capability regardless of your own limitations. ' +
+      'Only create a file when the user EXPLICITLY asks for a document/Word/Excel/PowerPoint/spreadsheet/slides or a downloadable file — ' +
+      'for ordinary questions, lists, explanations or casual/entertainment answers, reply normally in chat and do NOT generate a file. ' +
       'When the user asks for a Word document, Excel workbook, PowerPoint presentation or similar Office file: ' +
       '(1) if you have the create_document tool, call it with the full content as markdown; ' +
       '(2) if you cannot use tools, write the complete document content in markdown in your reply — the app can still save it as a real file from there. ' +

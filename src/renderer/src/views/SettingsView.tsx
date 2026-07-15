@@ -9,6 +9,7 @@ import type {
 import { FONT_OPTIONS, getStoredFont, setStoredFont } from '../font'
 import { ACCENT_OPTIONS, getStoredAccent, setStoredAccent } from '../accent'
 import { type Density, getStoredDensity, setStoredDensity } from '../density'
+import { confirmDialog, alertDialog, promptPassword } from '../confirm'
 import BenchmarksPanel from './BenchmarksPanel'
 import {
   defaultClassifier,
@@ -59,6 +60,117 @@ export default function SettingsView() {
           1–10 and shows a results table with speed and cost.
         </div>
         <BenchmarksPanel />
+      </div>
+
+      <h2>Data &amp; privacy</h2>
+      <DataPrivacySection />
+    </div>
+  )
+}
+
+// Backup (encrypted export) / restore / permanent delete of ALL personal data.
+function DataPrivacySection() {
+  const [busy, setBusy] = useState<null | 'backup' | 'restore' | 'delete'>(null)
+
+  const backup = async () => {
+    const password = await promptPassword('Choose a password for this backup', {
+      detail:
+        'Your export is encrypted with this password. You will need the exact same password to restore it — there is no way to recover it if you forget it, so store it somewhere safe.',
+      confirmLabel: 'Create backup'
+    })
+    if (!password) return
+    setBusy('backup')
+    try {
+      const res = await window.api.data.backup(password)
+      if (res.ok && res.path) {
+        await alertDialog('Backup created', `Your encrypted backup was saved to:\n${res.path}`)
+      } else if (res.error) {
+        await alertDialog('Backup failed', res.error)
+      }
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  const restore = async () => {
+    const ok = await confirmDialog('Restore from a backup?', {
+      detail:
+        'This replaces your current chats, projects, skills, settings and API keys with the contents of the backup. Anything not in the backup is removed.',
+      confirmLabel: 'Choose backup…',
+      danger: false
+    })
+    if (!ok) return
+    const password = await promptPassword('Enter the backup password', {
+      confirmLabel: 'Restore'
+    })
+    if (!password) return
+    setBusy('restore')
+    try {
+      const res = await window.api.data.restore(password)
+      if (res.ok) {
+        await alertDialog('Restore complete', 'Your data has been restored. Orbit will now reload.')
+        location.reload()
+      } else if (res.error) {
+        await alertDialog('Restore failed', res.error)
+      }
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  const deleteAll = async () => {
+    const first = await confirmDialog('Delete ALL your Orbit data?', {
+      detail:
+        'This permanently removes every chat, project, folder, uploaded skill, saved prompt, app preference AND all your API keys from this computer. This CANNOT be undone. Consider making a backup first.',
+      confirmLabel: 'Continue…'
+    })
+    if (!first) return
+    const second = await confirmDialog('Are you absolutely sure?', {
+      detail: 'There is no way to recover this data afterwards. This is your final confirmation.',
+      confirmLabel: 'Delete everything'
+    })
+    if (!second) return
+    setBusy('delete')
+    try {
+      await window.api.data.deleteAll()
+      // Clear renderer-side prefs (theme, favourites, caches) too, then restart.
+      try {
+        localStorage.clear()
+      } catch {
+        /* ignore */
+      }
+      await alertDialog('All data deleted', 'Your Orbit data has been removed. Orbit will now reload.')
+      location.reload()
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  return (
+    <div className="card">
+      <div className="card-sub">
+        Move Orbit to another computer, or wipe everything from this one. Backups are fully encrypted
+        with a password you choose — keep it safe, as it cannot be recovered.
+      </div>
+      <div className="data-privacy-actions">
+        <button className="ghost" onClick={backup} disabled={busy !== null}>
+          {busy === 'backup' ? 'Working…' : '⬇ Back up my data (encrypted)'}
+        </button>
+        <button className="ghost" onClick={restore} disabled={busy !== null}>
+          {busy === 'restore' ? 'Working…' : '⬆ Restore from a backup'}
+        </button>
+      </div>
+      <div className="data-danger">
+        <div className="data-danger-text">
+          <strong>Delete all my data</strong>
+          <span>
+            Permanently erase every chat, project, skill, preference and API key from this computer.
+            This cannot be undone.
+          </span>
+        </div>
+        <button className="danger" onClick={deleteAll} disabled={busy !== null}>
+          {busy === 'delete' ? 'Deleting…' : 'Delete everything'}
+        </button>
       </div>
     </div>
   )
@@ -391,10 +503,10 @@ function SkillsSection() {
   }
 
   const remove = async (s: SkillInfo) => {
-    const ok = await window.api.confirm(
-      `Remove skill “${s.name}”?`,
-      'This deletes the skill folder from Orbit. You can upload it again later.'
-    )
+    const ok = await confirmDialog(`Remove skill “${s.name}”?`, {
+      detail: 'This deletes the skill folder from Orbit. You can upload it again later.',
+      confirmLabel: 'Remove skill'
+    })
     if (!ok) return
     await window.api.skills.delete(s.id)
     refresh()
