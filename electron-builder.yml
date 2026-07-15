@@ -1,0 +1,39 @@
+appId: com.zuhaib.orbit
+productName: Orbit
+directories:
+  buildResources: build
+  output: release
+files:
+  - '!src/*'
+  - '!docs/*'
+  - '!build/*'
+  - '!release/*'
+  - '!electron.vite.config.{js,ts,mjs,cjs}'
+  - '!{.gitignore,CLAUDE.md,tsconfig.json,electron-builder.yml}'
+  - '!.e2e-*'
+  - '!mcp-demo-server.mjs'
+asarUnpack:
+  - resources/**
+  # native binaries can't load from inside the asar archive
+  - '**/*.node'
+win:
+  executableName: Orbit
+  icon: build/icon.ico
+  target:
+    - nsis
+nsis:
+  artifactName: Orbit-Setup-${version}.${ext}
+  shortcutName: Orbit
+  uninstallDisplayName: Orbit
+  createDesktopShortcut: always
+  oneClick: true
+# Auto-update feed: GitHub Releases. `npm run dist` emits latest.yml + a .blockmap
+# next to the installer; publishing those to github.com/muhzuhaib/orbit/releases
+# lets installed copies update themselves (electron-updater, see src/main/updater.ts).
+publish:
+  provider: github
+  owner: muhzuhaib
+  repo: orbit
+# reuse the locally present Electron binaries instead of downloading
+electronDist: node_modules/electron/dist
+npmRebuild: false

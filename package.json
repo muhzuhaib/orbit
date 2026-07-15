@@ -1,0 +1,53 @@
+{
+  "name": "orbit",
+  "version": "0.10.15",
+  "description": "Orbit — multi-model desktop AI workspace: Chat + Cowork for any model provider",
+  "main": "./out/main/index.js",
+  "author": "Muhammad Zuhaib Zahid",
+  "private": true,
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/muhzuhaib/orbit.git"
+  },
+  "scripts": {
+    "dev": "electron-vite dev",
+    "build": "electron-vite build",
+    "preview": "electron-vite preview",
+    "typecheck": "tsc --noEmit",
+    "dist": "electron-vite build && electron-builder --win"
+  },
+  "dependencies": {
+    "@ai-sdk/anthropic": "^4.0.12",
+    "@ai-sdk/google": "^4.0.12",
+    "@ai-sdk/openai": "^4.0.11",
+    "@ai-sdk/openai-compatible": "^3.0.7",
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "ai": "^7.0.21",
+    "highlight.js": "^11.11.1",
+    "html-to-docx": "^1.8.0",
+    "katex": "^0.16.47",
+    "mammoth": "^1.12.0",
+    "marked": "^18.0.6",
+    "pdf-parse": "^2.4.5",
+    "pptxgenjs": "^4.0.1",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "react-markdown": "^10.1.0",
+    "rehype-highlight": "^7.0.2",
+    "rehype-katex": "^7.0.1",
+    "remark-gfm": "^4.0.1",
+    "remark-math": "^6.0.0",
+    "xlsx": "^0.18.5"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "@types/react": "^18.3.12",
+    "@types/react-dom": "^18.3.1",
+    "@vitejs/plugin-react": "^4.3.4",
+    "electron": "^33.2.0",
+    "electron-builder": "^26.15.3",
+    "electron-vite": "^2.3.0",
+    "typescript": "^5.7.2",
+    "vite": "^5.4.11"
+  }
+}
