@@ -832,6 +832,14 @@ button.danger:hover:not(:disabled) {
     transition-duration: 0.01ms !important;
     scroll-behavior: auto !important;
   }
+  /* Loading indicators are functional, not decorative — they must keep
+     animating so "still working" stays visible even under reduced motion.
+     (Windows' "reduce animations" setting was freezing the working dots after a
+     single bounce, making the "…" look static/gone.) */
+  .working-dots > i {
+    animation-duration: 1.2s !important;
+    animation-iteration-count: infinite !important;
+  }
 }
 
 /* Text selection uses the theme accent instead of the browser default. */
@@ -858,6 +866,10 @@ button.danger:hover:not(:disabled) {
   min-width: 0;
   font-size: var(--text-body);
   line-height: 1.65;
+  /* Long unbroken strings (e.g. raw article URLs that briefly appear mid-stream
+     before markdown linkifies them) must wrap, never force a horizontal
+     scrollbar. Code blocks keep their own overflow-x via white-space: pre. */
+  overflow-wrap: anywhere;
 }
 
 .msg-note {
@@ -900,6 +912,7 @@ button.danger:hover:not(:disabled) {
   text-decoration: underline;
   text-underline-offset: 2px;
   text-decoration-thickness: 1px;
+  overflow-wrap: anywhere;
 }
 .markdown a:hover {
   text-decoration-thickness: 2px;

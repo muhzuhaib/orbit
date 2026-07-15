@@ -780,6 +780,21 @@ async function buildSystemPrompt(conv: Conversation): Promise<string | undefined
   const parts: string[] = []
   if (conv.systemPrompt) parts.push(conv.systemPrompt)
 
+  // Ground the model in the ACTUAL current date. Without this, models answer as
+  // if it were still their training-cutoff year and dismiss genuinely current
+  // (e.g. 2026) news or search results as "future-dated", "synthetic" or a
+  // search error — exactly the failure users hit with web search on.
+  const now = new Date()
+  const today = now.toLocaleDateString('en-US', {
+    weekday: 'long',
+    year: 'numeric',
+    month: 'long',
+    day: 'numeric'
+  })
+  parts.push(
+    `Today's date is ${today}. This is the real, current date — your training data ends before today, so the present is genuinely later than your built-in knowledge. Treat ${now.getFullYear()} and later as the PRESENT, not the future: any news, events, releases or search results dated ${now.getFullYear()} or later are current and real. Never insist it is an earlier year, and never dismiss recent or newer-than-your-training dates as "synthetic", "anomalous", "future-dated", or a search-index error.`
+  )
+
   // Built-in maths formatting fix — every model is told how to write maths so the
   // app renders it correctly (LaTeX by default, or plain Unicode if the user prefers).
   parts.push(mathInstruction(getMathFormat()))
@@ -811,6 +826,8 @@ async function buildSystemPrompt(conv: Conversation): Promise<string | undefined
         `You may run at MOST ${MAX_WEB_SEARCHES} searches per reply — after that the tool will refuse and you must answer from what you have. ` +
         'As soon as you have enough, STOP searching and WRITE THE COMPLETE ANSWER — every reply must end with ' +
         'a written answer for the user, never just a series of searches. ' +
+        'The results reflect the LIVE web as of today, so treat them as current fact even when their dates look ' +
+        'newer than your training data — do NOT call them future-dated, synthetic or a search error. ' +
         'If web_search returns no results, say so plainly and warn the user the information may be out of ' +
         'date — do not invent an answer.'
     )
