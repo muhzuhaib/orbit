@@ -535,6 +535,10 @@ export default function ChatsView({
   const [landingEffort, setLandingEffort] = useState<Effort>('off')
   useEffect(() => {
     if (!defaultModel) return
+    // Autopilot is a valid choice even though it isn't a concrete model in the
+    // list — without this exception, selecting it was instantly reset back to a
+    // real model, so landing-page Autopilot "did nothing".
+    if (landingModelId === AUTOPILOT_ID) return
     if (!landingModelId || !models.some((m) => m.id === landingModelId)) {
       setLandingModelId(defaultModel.id)
     }

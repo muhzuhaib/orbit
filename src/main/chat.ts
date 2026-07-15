@@ -348,36 +348,100 @@ export async function webSearch(query: string): Promise<string> {
 }
 
 /**
- * DuckDuckGo Instant Answer API (the keyless JSON endpoint — NOT the bot-blocked
- * HTML SERP). Returns a direct abstract for the query plus a few related topics,
- * which covers general/definitional questions the news + encyclopedia sources
- * answer poorly.
+ * DuckDuckGo HTML endpoint (html.duckduckgo.com) scraped for REAL search results
+ * — title + a genuine text snippet + the real destination URL — for ANY query.
+ * This replaced the old Instant Answer JSON API, which only returned an abstract
+ * for entity-like queries and was blank for most searches, starving models of
+ * content. Keyless; best-effort (returns [] on a challenge page or any failure).
  */
 async function searchDuckDuckGo(query: string): Promise<SearchResult[]> {
-  const res = await fetch(
-    `https://api.duckduckgo.com/?q=${encodeURIComponent(query)}&format=json&no_html=1&skip_disambig=1&t=orbit`,
-    { headers: { 'user-agent': SEARCH_UA }, signal: AbortSignal.timeout(SEARCH_TIMEOUT_MS) }
-  )
+  const res = await fetch(`https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`, {
+    headers: { 'user-agent': SEARCH_UA, accept: 'text/html' },
+    signal: AbortSignal.timeout(SEARCH_TIMEOUT_MS)
+  })
   if (!res.ok) return []
-  const j = (await res.json()) as {
-    AbstractText?: string
-    AbstractURL?: string
-    Heading?: string
-    RelatedTopics?: { Text?: string; FirstURL?: string }[]
+  const html = await res.text()
+  const results: SearchResult[] = []
+  // Each result: an <a class="result__a" href="…">Title</a> followed by an
+  // <a class="result__snippet">…</a>. Pair them up in document order.
+  const linkRe = /<a[^>]+class="result__a"[^>]*href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/g
+  const snippetRe = /<a[^>]+class="result__snippet"[^>]*>([\s\S]*?)<\/a>/g
+  const links = [...html.matchAll(linkRe)]
+  const snippets = [...html.matchAll(snippetRe)]
+  for (let i = 0; i < links.length && results.length < 6; i++) {
+    const url = decodeDdgUrl(links[i][1])
+    const title = stripHtml(links[i][2])
+    const snippet = snippets[i] ? stripHtml(snippets[i][1]) : ''
+    if (url && title) results.push({ title, url, snippet: snippet.slice(0, 300) })
   }
-  const out: SearchResult[] = []
-  if (j.AbstractText && j.AbstractURL) {
-    out.push({
-      title: j.Heading || query,
-      url: j.AbstractURL,
-      snippet: j.AbstractText.slice(0, 400)
+  return results
+}
+
+/** DuckDuckGo wraps result links as /l/?uddg=<encoded real url>; unwrap it. */
+function decodeDdgUrl(href: string): string {
+  const m = href.match(/[?&]uddg=([^&]+)/)
+  if (m) {
+    try {
+      return decodeURIComponent(m[1])
+    } catch {
+      /* fall through */
+    }
+  }
+  if (href.startsWith('//')) return 'https:' + href
+  return href
+}
+
+/**
+ * Fetch a single web page and return its readable text (issue: models were only
+ * getting thin headlines). Strips scripts/styles/markup, collapses whitespace and
+ * truncates so the model gets the article's substance for very few tokens.
+ * Node's fetch follows redirects, so this also resolves Google-News redirect URLs
+ * to the real article. Keyless, best-effort — never throws.
+ */
+const READ_PAGE_LIMIT = 2600 // ~650 tokens of real body text
+async function readPage(url: string): Promise<string> {
+  const clean = url.trim()
+  if (!/^https?:\/\//i.test(clean)) return 'That is not a valid http(s) URL to read.'
+  try {
+    const res = await fetch(clean, {
+      headers: { 'user-agent': SEARCH_UA, accept: 'text/html,*/*' },
+      signal: AbortSignal.timeout(SEARCH_TIMEOUT_MS + 2000)
     })
+    if (!res.ok) return `Could not open that page (HTTP ${res.status}).`
+    const type = res.headers.get('content-type') || ''
+    const raw = await res.text()
+    if (type.includes('json')) return raw.slice(0, READ_PAGE_LIMIT)
+    const text = htmlToText(raw)
+    if (!text) return 'That page had no readable text (it may need JavaScript or be blocked).'
+    const final = res.url && res.url !== clean ? `Source: ${res.url}\n\n` : ''
+    return final + text.slice(0, READ_PAGE_LIMIT) + (text.length > READ_PAGE_LIMIT ? ' …' : '')
+  } catch {
+    return 'Could not read that page (it timed out or blocked the request).'
   }
-  for (const t of j.RelatedTopics ?? []) {
-    if (out.length >= 4) break
-    if (t.Text && t.FirstURL) out.push({ title: t.Text.slice(0, 80), url: t.FirstURL, snippet: t.Text })
-  }
-  return out
+}
+
+/** Very small readability: drop non-content tags, unwrap markup, collapse space
+ *  while preserving paragraph/heading breaks as newlines. */
+function htmlToText(html: string): string {
+  return html
+    .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+    .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+    .replace(/<noscript[\s\S]*?<\/noscript>/gi, ' ')
+    .replace(/<(nav|header|footer|aside|form|svg)[\s\S]*?<\/\1>/gi, ' ')
+    .replace(/<!--[\s\S]*?-->/g, ' ')
+    .replace(/<\/(p|div|h[1-6]|li|br|tr)>/gi, '\n')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/&amp;/g, '&')
+    .replace(/&quot;/g, '"')
+    .replace(/&#x27;/g, "'")
+    .replace(/&#39;/g, "'")
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/[ \t]+/g, ' ')
+    .replace(/ *\n */g, '\n')
+    .replace(/\n{2,}/g, '\n')
+    .trim()
 }
 
 /** Wikipedia search API + an intro extract for the top hit (reliable facts). */
@@ -475,7 +539,7 @@ function buildToolSet(
     let searchCount = 0
     tools['web_search'] = dynamicTool({
       description:
-        'Search the live public web (Google News, DuckDuckGo, Wikipedia) and get back the top results (title, snippet, URL). Use this for current events, "what\'s new / latest", recent releases, prices, scores, facts you are unsure about, or anything that may have changed after your training. Prefer ONE broad query that covers the whole question — never one search per item. Pass a concise "query" string, then STOP and write a specific answer citing the URLs.',
+        'Search the live public web (Google News, DuckDuckGo, Wikipedia) and get back the top results (title, snippet, URL). Use this for current events, "what\'s new / latest", recent releases, prices, scores, facts you are unsure about, or anything that may have changed after your training. Prefer ONE broad query that covers the whole question — never one search per item. If a snippet is too thin to answer confidently, call read_page on its URL to get the full article text. Pass a concise "query" string, then write a specific answer citing the URLs.',
       // NOTE: query is intentionally NOT marked required — some openai-compat
       // models emit slightly different arg shapes, and a schema rejection would
       // surface as an ugly "tool didn't complete" error instead of a search.
@@ -497,6 +561,30 @@ function buildToolSet(
           return `You have already run ${MAX_WEB_SEARCHES} web searches — that is enough. STOP searching now and write a complete answer from the results you already have. Do not call web_search again.`
         }
         return webSearch(q)
+      }
+    })
+
+    // Companion "read a page" tool — the model calls it with a result URL to pull
+    // the actual article text when the search snippet is too thin (the fix for
+    // headline-only results starving weaker models of content). Read-only.
+    let readCount = 0
+    tools['read_page'] = dynamicTool({
+      description:
+        'Fetch the full readable text of ONE web page by its URL — use this to read an article whose search snippet was too short to answer from. Pass the result\'s "url". Read at most 2–3 of the most relevant pages, then write your answer citing them.',
+      inputSchema: jsonSchema({
+        type: 'object',
+        properties: { url: { type: 'string', description: 'The full http(s) URL to read' } }
+      }),
+      execute: async (args) => {
+        const a = args as { url?: unknown; link?: unknown }
+        const raw = typeof args === 'string' ? args : (a?.url ?? a?.link ?? '')
+        const url = String(raw ?? '').trim()
+        if (!url) return 'No URL provided. Call read_page again with a "url" from the search results.'
+        readCount += 1
+        if (readCount > MAX_WEB_SEARCHES) {
+          return 'You have read enough pages — STOP now and write your answer from what you have.'
+        }
+        return readPage(url)
       }
     })
   }
@@ -657,7 +745,7 @@ async function run(sender: WebContents, conversationId: string): Promise<void> {
       // When web search is on, keep the step ceiling low: combined with the
       // MAX_WEB_SEARCHES cap this stops a model looping on searches and eating
       // the context window. Non-search tool loops keep the roomier 14 steps.
-      ...(hasTools ? { tools, stopWhen: stepCountIs(conv.webSearch ? 6 : 14) } : {})
+      ...(hasTools ? { tools, stopWhen: stepCountIs(conv.webSearch ? 8 : 14) } : {})
     })
 
     // Buffer each tool call's input so its result renders as ONE combined card
@@ -768,6 +856,16 @@ function toolCard(name: string, input: unknown, output: unknown): string {
       ? `\n\n⟦tool⟧${summary}⟦body⟧${sources}⟦/tool⟧\n\n`
       : `\n\n⟦tool⟧${summary}⟦/tool⟧\n\n`
   }
+  if (name === 'read_page') {
+    const u = (input as { url?: unknown } | null)?.url
+    let host = ''
+    try {
+      host = new URL(String(u)).hostname.replace(/^www\./, '')
+    } catch {
+      /* no host */
+    }
+    return `\n\n⟦tool⟧📄 Read ${host || 'page'}⟦/tool⟧\n\n`
+  }
   return `\n\n⟦tool⟧✅ ${capitalize(friendlyToolName(name))} done⟦/tool⟧\n\n`
 }
 
@@ -841,6 +939,10 @@ async function buildSystemPrompt(conv: Conversation): Promise<string | undefined
         'Search EFFICIENTLY and FAST: prefer ONE broad query that covers the whole question (a single good ' +
         'query usually returns enough to answer many sub-parts); only search again if the first results clearly ' +
         'miss the point. Do NOT run a separate search for every item, year or name. ' +
+        'You MUST base your answer on the search results — read them carefully and synthesise them; never say you ' +
+        'could not find information when the results contain text. If a result snippet is too short to answer ' +
+        'confidently, call the read_page tool with that result\'s URL to fetch the full article text (read at most ' +
+        '2–3 pages). ' +
         `You may run at MOST ${MAX_WEB_SEARCHES} searches per reply — after that the tool will refuse and you must answer from what you have. ` +
         'As soon as you have enough, STOP searching and WRITE THE COMPLETE ANSWER — every reply must end with ' +
         'a written answer for the user, never just a series of searches. ' +

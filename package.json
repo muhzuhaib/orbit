@@ -1,6 +1,6 @@
 {
   "name": "orbit",
-  "version": "0.10.20",
+  "version": "0.10.21",
   "description": "Orbit — multi-model desktop AI workspace: Chat + Cowork for any model provider",
   "main": "./out/main/index.js",
   "author": "Muhammad Zuhaib Zahid",
