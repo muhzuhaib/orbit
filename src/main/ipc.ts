@@ -13,6 +13,7 @@ import * as settings from './settings'
 import * as conversations from './conversations'
 import * as projects from './projects'
 import { detectOllama, listModels, listProviders } from './registry'
+import { rateLimitedModels } from './modelHealth'
 import { testProvider } from './providers'
 import {
   classifyDifficulty,
@@ -97,6 +98,8 @@ export function registerIpc(): void {
 
   ipcMain.handle('models:list', () => listModels())
   ipcMain.handle('models:refresh', () => listModels(true))
+  // Runtime rate-limit state (models flagged after repeated 429/quota errors).
+  ipcMain.handle('models:health', () => rateLimitedModels())
   ipcMain.handle('models:add-custom', (_e, input: CustomModelInput) =>
     settings.addCustomModel(input)
   )

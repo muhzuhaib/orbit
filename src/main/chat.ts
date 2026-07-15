@@ -16,6 +16,7 @@ import { getProject, retrieve } from './projects'
 import { exposedTools } from './mcp'
 import { enabledSkills, getSkillBody } from './skills'
 import { appendMemory, getMemory } from './memory'
+import { recordModelResult } from './modelHealth'
 import { renderDocPreviewHtml, saveDocumentFromTool, type OfficeFormat } from './office'
 import type { DocumentPreviewEvent, DocumentRef } from '../shared/types'
 import { getMathFormat } from './settings'
@@ -791,6 +792,7 @@ async function run(sender: WebContents, conversationId: string): Promise<void> {
       documents: createdDocs.length ? createdDocs : undefined
     }
     appendMessage(conversationId, message)
+    recordModelResult(`${conv.providerId}/${conv.modelId}`, true)
     emit('chat:done', { conversationId, message } satisfies ChatDoneEvent)
   } catch (err) {
     if (controller.signal.aborted) {
@@ -806,6 +808,7 @@ async function run(sender: WebContents, conversationId: string): Promise<void> {
       if (full.length > 0) appendMessage(conversationId, message)
       emit('chat:done', { conversationId, message } satisfies ChatDoneEvent)
     } else {
+      recordModelResult(`${conv.providerId}/${conv.modelId}`, false, err)
       const message = err instanceof Error ? err.message : String(err)
       emit('chat:error', { conversationId, message } satisfies ChatErrorEvent)
     }

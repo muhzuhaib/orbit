@@ -29,12 +29,20 @@ export default function ModelSelect({
   const [open, setOpen] = useState(false)
   const [query, setQuery] = useState('')
   const [favorites, setFavorites] = useState<string[]>(() => getFavoriteModels())
+  // Models flagged rate-limited at runtime (id → cool-down expiry). Greyed and
+  // demoted in the list so the user avoids a model that will just keep erroring.
+  const [rateLimited, setRateLimited] = useState<Record<string, number>>({})
   const rootRef = useRef<HTMLDivElement>(null)
   const searchRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
     window.api.providers.list().then(setProviders)
+    const pull = () => window.api.models.health().then(setRateLimited)
+    pull()
+    return window.api.models.onHealth(pull)
   }, [])
+
+  const isLimited = (id: string): boolean => rateLimited[id] != null
 
   const toggleFav = (id: string, e: ReactMouseEvent) => {
     e.stopPropagation()
@@ -83,14 +91,18 @@ export default function ModelSelect({
     // 'autopilot' (the smart-routing pseudo-provider) always sorts first.
     const rank = (id: string): number => (id === 'autopilot' ? -1 : order.indexOf(id) + 1 || 999)
     const ids = [...byProvider.keys()].sort((a, b) => rank(a) - rank(b))
-    const out = ids.map((id) => ({ id, label: providerLabel(id), models: byProvider.get(id)! }))
+    // Within each provider, push rate-limited models to the bottom.
+    const demote = (list: ModelInfo[]): ModelInfo[] =>
+      [...list].sort((a, b) => (isLimited(a.id) ? 1 : 0) - (isLimited(b.id) ? 1 : 0))
+    const out = ids.map((id) => ({ id, label: providerLabel(id), models: demote(byProvider.get(id)!) }))
     if (favModels.length > 0) {
       // insert favourites after autopilot (if present) so autopilot stays at the very top
       const at = out[0]?.id === 'autopilot' ? 1 : 0
       out.splice(at, 0, { id: '__fav__', label: '★ Favourites', models: favModels })
     }
     return out
-  }, [models, providers, query, providerLabel, favorites])
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- isLimited closes over rateLimited
+  }, [models, providers, query, providerLabel, favorites, rateLimited])
 
   const pick = (id: string) => {
     onChange(id)
@@ -130,12 +142,13 @@ export default function ModelSelect({
                 {g.models.map((m) => {
                   const kind = classifyModel(m.modelId)
                   const fav = favorites.includes(m.id)
+                  const limited = isLimited(m.id)
                   return (
                     <div
                       key={m.id}
-                      className={`ms-option ${m.id === value ? 'selected' : ''}`}
+                      className={`ms-option ${m.id === value ? 'selected' : ''} ${limited ? 'limited' : ''}`}
                       onClick={() => pick(m.id)}
-                      title={m.modelId}
+                      title={limited ? 'Recently rate-limited / hit its free-tier quota — may error until the limit resets. You can still try it.' : m.modelId}
                     >
                       <button
                         className={`ms-star ${fav ? 'on' : ''}`}
@@ -145,6 +158,7 @@ export default function ModelSelect({
                         {fav ? <StarFilledIcon /> : <StarIcon />}
                       </button>
                       <span className="ms-option-label">{m.label}</span>
+                      {limited && <span className="ms-limited">rate-limited</span>}
                       {kind !== 'standard' && <KindBadge kind={kind} />}
                       <span className="ms-ctx">{formatContext(m.contextWindow)}</span>
                     </div>

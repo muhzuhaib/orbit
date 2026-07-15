@@ -4980,3 +4980,19 @@ button svg.icon {
 .data-danger .danger {
   flex-shrink: 0;
 }
+
+/* ---- Runtime rate-limit badge in the model picker ---- */
+.ms-option.limited {
+  opacity: 0.62;
+}
+.ms-limited {
+  flex-shrink: 0;
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: #d08a3e;
+  background: rgba(208, 138, 62, 0.14);
+  border-radius: 5px;
+  padding: 1px 6px;
+}

@@ -97,6 +97,10 @@ const api = {
     refresh: (): Promise<ModelInfo[]> => ipcRenderer.invoke('models:refresh'),
     /** fired after a background usability probe finishes — re-pull the list */
     onUpdated: (cb: () => void): (() => void) => subscribe('models:updated', cb),
+    /** models flagged rate-limited at runtime → epoch ms their cool-down lifts */
+    health: (): Promise<Record<string, number>> => ipcRenderer.invoke('models:health'),
+    /** fired when the runtime rate-limit state changes */
+    onHealth: (cb: () => void): (() => void) => subscribe('models:health', cb),
     addCustom: (input: CustomModelInput): Promise<ModelInfo> =>
       ipcRenderer.invoke('models:add-custom', input),
     removeCustom: (providerId: string, modelId: string): Promise<void> =>
