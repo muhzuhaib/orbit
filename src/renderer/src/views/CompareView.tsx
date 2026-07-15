@@ -8,7 +8,7 @@ import type {
   ModelInfo
 } from '../../../shared/types'
 import ModelSelect from './ModelSelect'
-import { PlusIcon, TrashIcon, WorkingDots } from './Icons'
+import { CompareIcon, PlusIcon, TrashIcon, WorkingDots } from './Icons'
 import { SectionComposer, promptWithAttachments } from './SectionComposer'
 import {
   clearCompareHistory,
@@ -269,6 +269,9 @@ export default function CompareView() {
       <div className="compare-turns">
         {turns.length === 0 ? (
           <div className="placeholder">
+            <span className="placeholder-icon">
+              <CompareIcon />
+            </span>
             <h1>Compare models</h1>
             <p>Pick 2 models above (add a 3rd with “+ Add model”), then ask one question to see their answers side by side.</p>
           </div>

@@ -276,8 +276,19 @@ const SEARCH_UA =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36'
 
 // Most a single reply may search. Prevents runaway models from firing dozens of
-// searches that flood the chat and blow out the context window.
-const MAX_WEB_SEARCHES = 5
+// searches that flood the chat and blow out the context window. Kept low so a
+// search turn stays fast (each search is a few parallel HTTP calls).
+const MAX_WEB_SEARCHES = 4
+
+// Per-source fetch budget. Short so a slow/blocked source can't stall the whole
+// reply — the other sources still return and the model answers from those.
+const SEARCH_TIMEOUT_MS = 6_000
+
+// Current-events / freshness intent: when the query looks like it wants the
+// latest happenings, news becomes the PRIMARY source and the encyclopedia is
+// demoted (so "what's new today" doesn't come back as Wikipedia articles).
+const NEWS_INTENT =
+  /\b(news|today|todays|latest|current|currently|recent|recently|now|this (week|month|morning|year)|breaking|update|updates|happening|headlines?|score|scores|results?|price|prices|stock|weather|forecast|released?|launch(ed|ing)?|announce|died|election|20\d\d)\b/i
 
 /**
  * Keyless web search across THREE independent sources in parallel, merged and
@@ -291,16 +302,25 @@ const MAX_WEB_SEARCHES = 5
 export async function webSearch(query: string): Promise<string> {
   const q = query.trim()
   if (!q) return 'No search query was provided. Call web_search again with a concise "query" string.'
-  // DuckDuckGo was removed: it now serves a bot-challenge page (HTTP 202, zero
-  // results) that only ever produced "no results" noise. Wikipedia + Google News
-  // are both reliable and keyless, so we lean on them exclusively.
-  const [wiki, news] = await Promise.all([
-    searchWikipedia(q).catch(() => [] as SearchResult[]),
-    searchNews(q).catch(() => [] as SearchResult[])
+  const newsy = NEWS_INTENT.test(q)
+
+  // Three keyless sources, all fired in parallel and failing soft to []:
+  //   • Google News RSS — fresh current-events coverage (headline + source + date)
+  //   • DuckDuckGo Instant Answer — a direct answer / entity summary for the query
+  //   • Wikipedia — reliable background facts + an intro extract for the top hit
+  // News-intent queries put News FIRST and drop Wikipedia to the back so
+  // "what's new today" returns actual headlines, not encyclopedia articles.
+  const [news, ddg, wiki] = await Promise.all([
+    searchNews(q).catch(() => [] as SearchResult[]),
+    searchDuckDuckGo(q).catch(() => [] as SearchResult[]),
+    searchWikipedia(q).catch(() => [] as SearchResult[])
   ])
+
+  const ordered = newsy ? [...news, ...ddg, ...wiki] : [...ddg, ...wiki, ...news]
+
   const merged: SearchResult[] = []
   const seen = new Set<string>()
-  for (const r of [...wiki, ...news]) {
+  for (const r of ordered) {
     if (!r.url || !r.title) continue
     const key = r.url
       .replace(/^https?:\/\//, '')
@@ -314,10 +334,50 @@ export async function webSearch(query: string): Promise<string> {
     // Be explicit so the model doesn't silently fall back to stale training data.
     return `Live web search returned no results for "${q}". Tell the user you could not retrieve live results right now and that anything you say may be out of date — do NOT present old training data as current.`
   }
-  return merged
-    .slice(0, 5)
-    .map((r, n) => `${n + 1}. ${r.title}\n${r.snippet}\n${r.url}`)
-    .join('\n\n')
+  const header = newsy
+    ? `Live web results for "${q}" (freshest first). Synthesize these into a clear, specific answer and cite the URLs:`
+    : `Live web results for "${q}". Base your answer on these and cite the URLs:`
+  return (
+    header +
+    '\n\n' +
+    merged
+      .slice(0, 6)
+      .map((r, n) => `${n + 1}. ${r.title}\n${r.snippet}\n${r.url}`)
+      .join('\n\n')
+  )
+}
+
+/**
+ * DuckDuckGo Instant Answer API (the keyless JSON endpoint — NOT the bot-blocked
+ * HTML SERP). Returns a direct abstract for the query plus a few related topics,
+ * which covers general/definitional questions the news + encyclopedia sources
+ * answer poorly.
+ */
+async function searchDuckDuckGo(query: string): Promise<SearchResult[]> {
+  const res = await fetch(
+    `https://api.duckduckgo.com/?q=${encodeURIComponent(query)}&format=json&no_html=1&skip_disambig=1&t=orbit`,
+    { headers: { 'user-agent': SEARCH_UA }, signal: AbortSignal.timeout(SEARCH_TIMEOUT_MS) }
+  )
+  if (!res.ok) return []
+  const j = (await res.json()) as {
+    AbstractText?: string
+    AbstractURL?: string
+    Heading?: string
+    RelatedTopics?: { Text?: string; FirstURL?: string }[]
+  }
+  const out: SearchResult[] = []
+  if (j.AbstractText && j.AbstractURL) {
+    out.push({
+      title: j.Heading || query,
+      url: j.AbstractURL,
+      snippet: j.AbstractText.slice(0, 400)
+    })
+  }
+  for (const t of j.RelatedTopics ?? []) {
+    if (out.length >= 4) break
+    if (t.Text && t.FirstURL) out.push({ title: t.Text.slice(0, 80), url: t.FirstURL, snippet: t.Text })
+  }
+  return out
 }
 
 /** Wikipedia search API + an intro extract for the top hit (reliable facts). */
@@ -325,7 +385,7 @@ async function searchWikipedia(query: string): Promise<SearchResult[]> {
   const api = 'https://en.wikipedia.org/w/api.php'
   const sres = await fetch(
     `${api}?action=query&list=search&srsearch=${encodeURIComponent(query)}&format=json&srlimit=4`,
-    { headers: { 'user-agent': SEARCH_UA }, signal: AbortSignal.timeout(9_000) }
+    { headers: { 'user-agent': SEARCH_UA }, signal: AbortSignal.timeout(SEARCH_TIMEOUT_MS) }
   )
   if (!sres.ok) return []
   const sjson = (await sres.json()) as {
@@ -343,7 +403,7 @@ async function searchWikipedia(query: string): Promise<SearchResult[]> {
   try {
     const eres = await fetch(
       `${api}?action=query&prop=extracts&exintro=1&explaintext=1&titles=${encodeURIComponent(hits[0].title)}&format=json`,
-      { headers: { 'user-agent': SEARCH_UA }, signal: AbortSignal.timeout(9_000) }
+      { headers: { 'user-agent': SEARCH_UA }, signal: AbortSignal.timeout(SEARCH_TIMEOUT_MS) }
     )
     if (eres.ok) {
       const ejson = (await eres.json()) as { query?: { pages?: Record<string, { extract?: string }> } }
@@ -360,17 +420,26 @@ async function searchWikipedia(query: string): Promise<SearchResult[]> {
 async function searchNews(query: string): Promise<SearchResult[]> {
   const res = await fetch(
     `https://news.google.com/rss/search?q=${encodeURIComponent(query)}&hl=en-US&gl=US&ceid=US:en`,
-    { headers: { 'user-agent': SEARCH_UA }, signal: AbortSignal.timeout(9_000) }
+    { headers: { 'user-agent': SEARCH_UA }, signal: AbortSignal.timeout(SEARCH_TIMEOUT_MS) }
   )
   if (!res.ok) return []
   const xml = await res.text()
   const results: SearchResult[] = []
-  for (const it of [...xml.matchAll(/<item>([\s\S]*?)<\/item>/g)].slice(0, 4)) {
-    const title = stripHtml((it[1].match(/<title>([\s\S]*?)<\/title>/)?.[1] ?? '').replace(/<!\[CDATA\[|\]\]>/g, ''))
-    const url = (it[1].match(/<link>([\s\S]*?)<\/link>/)?.[1] ?? '').trim()
-    const pub = (it[1].match(/<pubDate>([\s\S]*?)<\/pubDate>/)?.[1] ?? '').trim()
-    if (!title || !url) continue
-    results.push({ title, url, snippet: pub ? `News · ${pub}` : 'News result' })
+  for (const it of [...xml.matchAll(/<item>([\s\S]*?)<\/item>/g)].slice(0, 6)) {
+    const block = it[1]
+    const rawTitle = stripHtml((block.match(/<title>([\s\S]*?)<\/title>/)?.[1] ?? '').replace(/<!\[CDATA\[|\]\]>/g, ''))
+    const url = (block.match(/<link>([\s\S]*?)<\/link>/)?.[1] ?? '').trim()
+    const pub = (block.match(/<pubDate>([\s\S]*?)<\/pubDate>/)?.[1] ?? '').trim()
+    const source = stripHtml(block.match(/<source[^>]*>([\s\S]*?)<\/source>/)?.[1] ?? '')
+    if (!rawTitle || !url) continue
+    // Google News titles read "Headline - Source"; split the source out so the
+    // headline is clean and the source is shown as attribution.
+    const m = rawTitle.match(/^(.*?)\s+-\s+([^-]+)$/)
+    const title = m ? m[1] : rawTitle
+    const src = source || (m ? m[2] : '')
+    const date = pub ? new Date(pub).toISOString().slice(0, 10) : ''
+    const meta = [src, date].filter(Boolean).join(' · ')
+    results.push({ title, url, snippet: meta ? `${meta} — news headline` : 'News headline' })
   }
   return results
 }
@@ -401,7 +470,7 @@ function buildToolSet(sender: WebContents, conversationId: string, webSearchOn: 
     let searchCount = 0
     tools['web_search'] = dynamicTool({
       description:
-        'Search the public web (Wikipedia and Google News) and get back the top results (title, snippet, URL). Use this for current events, recent releases, facts you are unsure about, or anything that may have changed after your training. Use 1–3 BROAD queries total — never one search per item. Always pass a concise "query" string, then STOP and write your answer, citing the URLs.',
+        'Search the live public web (Google News, DuckDuckGo, Wikipedia) and get back the top results (title, snippet, URL). Use this for current events, "what\'s new / latest", recent releases, prices, scores, facts you are unsure about, or anything that may have changed after your training. Prefer ONE broad query that covers the whole question — never one search per item. Pass a concise "query" string, then STOP and write a specific answer citing the URLs.',
       // NOTE: query is intentionally NOT marked required — some openai-compat
       // models emit slightly different arg shapes, and a schema rejection would
       // surface as an ugly "tool didn't complete" error instead of a search.
@@ -574,7 +643,7 @@ async function run(sender: WebContents, conversationId: string): Promise<void> {
       // When web search is on, keep the step ceiling low: combined with the
       // MAX_WEB_SEARCHES cap this stops a model looping on searches and eating
       // the context window. Non-search tool loops keep the roomier 14 steps.
-      ...(hasTools ? { tools, stopWhen: stepCountIs(conv.webSearch ? 8 : 14) } : {})
+      ...(hasTools ? { tools, stopWhen: stepCountIs(conv.webSearch ? 6 : 14) } : {})
     })
 
     // Buffer each tool call's input so its result renders as ONE combined card
@@ -736,8 +805,9 @@ async function buildSystemPrompt(conv: Conversation): Promise<string | undefined
         'after your training cutoff, you MUST call the web_search tool FIRST and base your answer ONLY on ' +
         'the results it returns (cite the source URLs). Do NOT answer such questions from memory, and NEVER ' +
         'present training-data guesses as current fact. ' +
-        'Search EFFICIENTLY: use a few BROAD queries (usually 1–3 is enough — one good query often returns ' +
-        'an overview that covers many sub-parts); do NOT run a separate search for every item, year or name. ' +
+        'Search EFFICIENTLY and FAST: prefer ONE broad query that covers the whole question (a single good ' +
+        'query usually returns enough to answer many sub-parts); only search again if the first results clearly ' +
+        'miss the point. Do NOT run a separate search for every item, year or name. ' +
         `You may run at MOST ${MAX_WEB_SEARCHES} searches per reply — after that the tool will refuse and you must answer from what you have. ` +
         'As soon as you have enough, STOP searching and WRITE THE COMPLETE ANSWER — every reply must end with ' +
         'a written answer for the user, never just a series of searches. ' +

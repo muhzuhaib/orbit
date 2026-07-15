@@ -66,6 +66,9 @@ function subscribe<T>(channel: string, cb: (payload: T) => void): () => void {
 // and mirrored in src/renderer/src/env.d.ts.
 const api = {
   getVersion: (): Promise<string> => ipcRenderer.invoke('app:version'),
+  /** Recolour the native title-bar overlay to match the current theme. */
+  setTitlebarTheme: (dark: boolean): Promise<void> =>
+    ipcRenderer.invoke('window:titlebar', dark),
   confirm: (message: string, detail?: string): Promise<boolean> =>
     ipcRenderer.invoke('ui:confirm', message, detail),
 
@@ -292,6 +295,7 @@ const api = {
     setEnabled: (id: string, enabled: boolean): Promise<void> =>
       ipcRenderer.invoke('skills:set-enabled', id, enabled),
     openFolder: (): Promise<void> => ipcRenderer.invoke('skills:open-folder'),
+    delete: (id: string): Promise<void> => ipcRenderer.invoke('skills:delete', id),
     upload: (): Promise<{ ok: boolean; message: string } | null> =>
       ipcRenderer.invoke('skills:upload')
   },

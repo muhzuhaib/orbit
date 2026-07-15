@@ -21,7 +21,9 @@ import { useBetaFlag } from '../betaFlags'
 import {
   AUTOPILOT_ID,
   addAutopilotSavings,
+  bestModel,
   defaultClassifier,
+  fastModel,
   getAutopilotSavings,
   getAutopilotSettings,
   heuristicDifficulty,
@@ -33,6 +35,7 @@ import { pickDefaultModel, setLastModel } from '../prefs'
 import { useDictation } from '../dictation'
 import {
   AttachIcon,
+  BrainIcon,
   CameraIcon,
   CloseIcon,
   CoinIcon,
@@ -438,18 +441,25 @@ export default function ChatsView({
       // Autopilot self-heal: if the routed model failed, try another usable
       // model for the same message before surfacing any error.
       const retry = autopilotRetryRef.current
+      // With web search on, each retry re-runs the whole (slow) search turn, so
+      // cap retries to ONE and recover with a FAST model — retrying across
+      // several big/slow models is what turned one answer into a 10-minute wait.
+      const webOn = convRef.current?.webSearch ?? false
+      const maxFallbacks = webOn ? 1 : AUTOPILOT_MAX_FALLBACKS
       if (
         retry &&
         retry.convId === e.conversationId &&
         convRef.current?.id === e.conversationId &&
         convRef.current?.autopilot &&
-        retry.count < AUTOPILOT_MAX_FALLBACKS
+        retry.count < maxFallbacks
       ) {
         const list = routableRef.current
-        const priced = priciestModel(list)
+        // Recover with a fast model first (quick retry). Only fall back to the
+        // priciest model when web search is off and speed matters less.
+        const preferred = webOn ? fastModel(list) : priciestModel(list)
         const fallback =
-          priced && !retry.tried.has(priced.id)
-            ? priced
+          preferred && !retry.tried.has(preferred.id)
+            ? preferred
             : list.find((m) => !retry.tried.has(m.id))
         if (fallback) {
           retry.tried.add(fallback.id)
@@ -504,6 +514,9 @@ export default function ChatsView({
   // working) — if the chosen model vanishes from the list, snap to one that
   // actually exists so new chats never start on a dead model.
   const [landingModelId, setLandingModelId] = useState('')
+  // Web search / thinking chosen on the landing screen, applied to the new chat.
+  const [landingWeb, setLandingWeb] = useState(false)
+  const [landingThinking, setLandingThinking] = useState(false)
   useEffect(() => {
     if (!defaultModel) return
     if (!landingModelId || !models.some((m) => m.id === landingModelId)) {
@@ -511,14 +524,37 @@ export default function ChatsView({
     }
   }, [defaultModel, landingModelId, models])
 
+  // Does the model currently picked on the landing screen support a thinking
+  // mode? (Autopilot is treated as thinking-capable — it may route to one.)
+  const landingCanThink = useMemo(() => {
+    if (landingModelId === AUTOPILOT_ID) return true
+    const [pid, ...rest] = (landingModelId || defaultModel?.id || '').split('/')
+    const kind = providers.find((p) => p.id === pid)?.kind
+    return supportsThinking(kind, rest.join('/'))
+  }, [landingModelId, defaultModel, providers])
+
   // Landing composer: start a brand-new chat from the empty state and send the
   // first message immediately (Claude-desktop style "how can I help" box).
   const startChat = async (text: string, attachments: ChatAttachment[]) => {
     const id = landingModelId || defaultModel?.id
     if (!id) return
-    const [providerId, ...rest] = id.split('/')
-    const c = await window.api.conversations.create(providerId, rest.join('/'))
-    setLastModel(id)
+    const isAuto = id === AUTOPILOT_ID
+    // Autopilot has no concrete model of its own — seed the chat on the best
+    // available model and flip the autopilot flag on.
+    const concrete = isAuto ? bestModel(routableRef.current)?.id ?? defaultModel?.id : id
+    if (!concrete) return
+    const [providerId, ...rest] = concrete.split('/')
+    let c = await window.api.conversations.create(providerId, rest.join('/'))
+    // Carry the landing toggles onto the new conversation.
+    const patch: Record<string, unknown> = {}
+    if (isAuto) patch.autopilot = true
+    if (landingWeb) patch.webSearch = true
+    if (landingThinking && landingCanThink) {
+      patch.thinking = true
+      patch.effort = 'medium'
+    }
+    if (Object.keys(patch).length > 0) c = await window.api.conversations.update(c.id, patch)
+    if (!isAuto) setLastModel(id)
     setConvError(c.id, null)
     setStreamReasoning('')
     setConv({
@@ -526,7 +562,18 @@ export default function ChatsView({
       messages: [{ role: 'user', content: text, attachments: attachments.length ? attachments : undefined }]
     })
     setStreamText('')
-    window.api.chat.send(c.id, text, attachments.length ? attachments : undefined)
+    // For an Autopilot first message, route it the same way send() would.
+    let modelOverride: { providerId: string; modelId: string } | undefined
+    if (isAuto) {
+      const difficulty = heuristicDifficulty(text, 0)
+      const target = routeModel(difficulty, routableRef.current)
+      if (target) {
+        modelOverride = { providerId: target.providerId, modelId: target.modelId }
+        setRouteNote(`⚡ Autopilot · ${difficulty} → ${target.label}`)
+        autopilotRetryRef.current = { convId: c.id, tried: new Set([target.id]), count: 0 }
+      }
+    }
+    window.api.chat.send(c.id, text, attachments.length ? attachments : undefined, modelOverride)
     refreshMetas()
   }
 
@@ -547,6 +594,12 @@ export default function ChatsView({
   }
 
   const remove = async (id: string) => {
+    const title = metas.find((m) => m.id === id)?.title || 'this chat'
+    const ok = await window.api.confirm(
+      `Delete “${title}”?`,
+      'This permanently removes the conversation and cannot be undone.'
+    )
+    if (!ok) return
     await window.api.conversations.delete(id)
     if (conv?.id === id) setConv(null)
     refreshMetas()
@@ -582,6 +635,12 @@ export default function ChatsView({
     setFolders(await window.api.folders.rename(id, name.trim()))
   }
   const deleteFolder = async (id: string) => {
+    const name = folders.find((f) => f.id === id)?.name || 'this folder'
+    const ok = await window.api.confirm(
+      `Delete folder “${name}”?`,
+      'The folder is removed; the chats inside it are kept and become unfiled.'
+    )
+    if (!ok) return
     setFolders(await window.api.folders.delete(id))
     refreshMetas()
   }
@@ -900,12 +959,17 @@ export default function ChatsView({
                 <p>Start a conversation with any model — switch anytime.</p>
               </div>
               <LandingComposer
-                models={models}
+                models={pickerModels}
                 modelValue={landingModelId || `${defaultModel?.providerId}/${defaultModel?.modelId}`}
                 onModelChange={(v) => {
                   setLandingModelId(v)
-                  setLastModel(v)
+                  if (v !== AUTOPILOT_ID) setLastModel(v)
                 }}
+                webSearch={landingWeb}
+                onToggleWebSearch={() => setLandingWeb((w) => !w)}
+                canThink={landingCanThink}
+                thinking={landingThinking}
+                onToggleThinking={() => setLandingThinking((t) => !t)}
                 onSend={startChat}
                 onOpenAttachment={setPreviewAttachment}
               />
@@ -1822,12 +1886,22 @@ function LandingComposer({
   models,
   modelValue,
   onModelChange,
+  webSearch,
+  onToggleWebSearch,
+  canThink,
+  thinking,
+  onToggleThinking,
   onSend,
   onOpenAttachment
 }: {
   models: ModelInfo[]
   modelValue: string
   onModelChange: (value: string) => void
+  webSearch: boolean
+  onToggleWebSearch: () => void
+  canThink: boolean
+  thinking: boolean
+  onToggleThinking: () => void
   onSend: (text: string, attachments: ChatAttachment[]) => void
   onOpenAttachment: (a: ChatAttachment) => void
 }) {
@@ -1896,6 +1970,30 @@ function LandingComposer({
       <div className="landing-bar">
         <ModelSelect models={models} value={modelValue} onChange={onModelChange} openUp />
         <div className="landing-tools">
+          <button
+            className={`landing-icon-btn ${webSearch ? 'on' : ''}`}
+            title={
+              webSearch
+                ? 'Web search is ON — the model can look things up on the web for this chat'
+                : 'Web search: let the model look things up on the web (no API key needed)'
+            }
+            onClick={onToggleWebSearch}
+          >
+            <GlobeIcon />
+          </button>
+          {canThink && (
+            <button
+              className={`landing-icon-btn ${thinking ? 'on' : ''}`}
+              title={
+                thinking
+                  ? 'Extended thinking is ON — the model reasons step by step before answering'
+                  : 'Extended thinking: let the model reason step by step before answering'
+              }
+              onClick={onToggleThinking}
+            >
+              <BrainIcon />
+            </button>
+          )}
           <button className="landing-icon-btn" title="Attach documents or images" onClick={attach}>
             <AttachIcon />
           </button>

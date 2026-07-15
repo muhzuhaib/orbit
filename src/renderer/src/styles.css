@@ -167,6 +167,39 @@ body {
   height: 100vh;
 }
 
+/* ---------- Frameless title-bar drag region ----------
+   The window is frameless; the OS paints only the min/max/close controls into a
+   themed overlay at the top-right. These rules make the top strips draggable so
+   the window can still be moved, while every interactive element stays clickable
+   (no-drag). Right-side clearance keeps toolbar content clear of the controls. */
+.sidebar-brand,
+.chat-toolbar,
+.compare-head,
+.council-setup {
+  -webkit-app-region: drag;
+}
+button,
+a,
+input,
+select,
+textarea,
+[role='button'],
+.ms-trigger,
+.chat-item,
+.section-recent-item,
+.section-example-chip,
+.attach-chip,
+label {
+  -webkit-app-region: no-drag;
+}
+/* Reserve room at the top-right for the native window controls (~138px). */
+.chat-toolbar {
+  padding-right: 150px;
+}
+.compare-head {
+  padding-right: 150px;
+}
+
 .sidebar {
   width: 232px;
   flex-shrink: 0;
@@ -316,9 +349,12 @@ body {
   padding: 30px 40px 60px;
 }
 
-/* Cap content width, not the scroll container — keeps the scrollbar at the window edge */
+/* Cap content width, not the scroll container — keeps the scrollbar at the window
+   edge — and centre the column so the modal isn't left-heavy with dead space on
+   the right. */
 .settings > * {
   max-width: 760px;
+  margin-inline: auto;
 }
 
 .settings h1 {
@@ -1147,15 +1183,24 @@ a:focus-visible {
 }
 
 .nav-hide {
+  display: flex;
+  align-items: center;
+  justify-content: center;
   background: transparent;
   border: none;
   color: var(--text-dim);
-  padding: 2px 8px;
-  font-size: 15px;
+  padding: 6px;
+  border-radius: 8px;
+  transition: background 0.16s ease, color 0.16s ease;
+}
+.nav-hide svg {
+  width: 18px;
+  height: 18px;
 }
 
 .nav-hide:hover {
   color: var(--text);
+  background: var(--bg-hover);
 }
 
 .nav-float {
@@ -1181,9 +1226,19 @@ a:focus-visible {
 }
 
 .nav-show {
-  padding: 5px 10px;
-  font-size: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 7px;
   background: var(--bg-sidebar);
+  color: var(--text-dim);
+}
+.nav-show svg {
+  width: 18px;
+  height: 18px;
+}
+.nav-show:hover {
+  color: var(--text);
 }
 
 .nav-show-gear {
@@ -2267,18 +2322,20 @@ button svg.icon {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 16px 20px 10px;
+  gap: 12px;
+  padding: 18px 22px 14px;
 }
 
 .compare-head h1 {
-  font-size: 20px;
+  font-size: 21px;
   font-weight: 600;
+  letter-spacing: -0.01em;
 }
 
 .compare-cols-header {
   display: grid;
   gap: 12px;
-  padding: 0 20px 10px;
+  padding: 4px 22px 14px;
   border-bottom: 1px solid var(--border);
 }
 
@@ -2328,12 +2385,16 @@ button svg.icon {
 .compare-cell {
   background: var(--bg-sidebar);
   border: 1px solid var(--border);
-  border-radius: 10px;
-  padding: 12px 14px;
+  border-radius: 12px;
+  padding: 14px 16px;
   font-size: 13.5px;
-  line-height: 1.55;
+  line-height: 1.6;
   overflow-x: auto;
   min-width: 0;
+  transition: border-color 0.16s ease;
+}
+.compare-cell:hover {
+  border-color: color-mix(in srgb, var(--accent) 35%, var(--border));
 }
 
 .compare-cell-error {
@@ -2721,8 +2782,16 @@ button svg.icon {
 /* --- Compare: tabs + history --- */
 .compare-tabs {
   display: flex;
-  gap: 4px;
+  gap: 2px;
   margin-left: 8px;
+  padding: 3px;
+  background: var(--bg-sidebar);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+.compare-tabs button {
+  border-radius: 7px;
+  transition: background 0.16s ease, color 0.16s ease;
 }
 .compare-tabs .tab-active {
   background: var(--accent-soft);
@@ -3313,6 +3382,27 @@ button svg.icon {
   flex: 1;
   min-height: 0;
   display: flex;
+  position: relative;
+}
+/* Soft fades at the top and bottom of the scroll region so content melts away
+   near the rounded modal edges instead of hitting them flush. */
+.modal-body::before,
+.modal-body::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 24px;
+  pointer-events: none;
+  z-index: 3;
+}
+.modal-body::before {
+  top: 0;
+  background: linear-gradient(to bottom, var(--bg), transparent);
+}
+.modal-body::after {
+  bottom: 0;
+  background: linear-gradient(to top, var(--bg), transparent);
 }
 /* the SettingsView already scrolls itself (flex:1 + overflow) — just let it fill.
    Extra right padding on the heading row so it never sits under the ✕ button. */
@@ -3695,10 +3785,21 @@ button svg.icon {
   border-radius: 12px;
   padding: 13px 16px;
   cursor: pointer;
+  box-shadow: 0 1px 2px var(--shadow);
+  transition: transform 0.16s ease, filter 0.16s ease, box-shadow 0.16s ease;
+}
+.section-cta:hover:not(:disabled) {
+  filter: brightness(1.06);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 14px var(--shadow);
+}
+.section-cta:active:not(:disabled) {
+  transform: translateY(0);
 }
 .section-cta:disabled {
   opacity: 0.5;
   cursor: default;
+  box-shadow: none;
 }
 .section-cta .icon {
   width: 18px;
@@ -3859,8 +3960,32 @@ button svg.icon {
 .compare-col-head {
   background: var(--bg-sidebar);
   border: 1px solid var(--border);
-  border-radius: 10px;
+  border-radius: 12px;
   padding: 8px;
+  transition: border-color 0.16s ease, box-shadow 0.16s ease;
+}
+.compare-col-head:focus-within {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+/* Elegant empty state for Compare (shares the .placeholder element). */
+.compare .placeholder {
+  gap: 6px;
+}
+.compare .placeholder .placeholder-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 52px;
+  height: 52px;
+  margin: 0 auto 6px;
+  border-radius: 14px;
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+.compare .placeholder .placeholder-icon svg {
+  width: 28px;
+  height: 28px;
 }
 .compare-cell-meta {
   display: flex;
@@ -4422,35 +4547,58 @@ button svg.icon {
 
 /* ---- Item 5: friendly empty-state starter examples ---- */
 .section-examples {
-  margin-top: var(--space-4);
+  margin-top: var(--space-5);
   width: 100%;
-  max-width: 480px;
+  max-width: 520px;
+  margin-inline: auto;
 }
 .section-examples-label {
   font-size: var(--text-sm);
   color: var(--text-dim);
-  margin-bottom: var(--space-2);
+  margin-bottom: var(--space-3);
   text-align: center;
 }
+/* A clean vertical list of equal-width suggestion rows (was ragged pills). */
 .section-examples-chips {
   display: flex;
-  flex-wrap: wrap;
+  flex-direction: column;
   gap: var(--space-2);
-  justify-content: center;
 }
 .section-example-chip {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  width: 100%;
+  text-align: left;
   background: var(--bg-sidebar);
   border: 1px solid var(--border);
-  border-radius: 999px;
+  border-radius: 12px;
   color: var(--text);
   font-size: var(--text-ui);
-  padding: 6px 13px;
+  padding: 12px 16px;
   cursor: pointer;
-  transition: background 0.18s cubic-bezier(0.4, 0, 0.2, 1), border-color 0.18s cubic-bezier(0.4, 0, 0.2, 1);
+  transition: transform 0.16s ease, background 0.16s ease, border-color 0.16s ease;
+}
+/* Subtle "→" affordance on the right of each row. */
+.section-example-chip::after {
+  content: '→';
+  color: var(--text-dim);
+  font-size: 15px;
+  opacity: 0;
+  transform: translateX(-4px);
+  transition: opacity 0.16s ease, transform 0.16s ease, color 0.16s ease;
 }
 .section-example-chip:hover:not(:disabled) {
   background: var(--bg-hover);
   border-color: var(--accent);
+  color: var(--text);
+  transform: translateY(-1px);
+}
+.section-example-chip:hover:not(:disabled)::after {
+  opacity: 1;
+  transform: translateX(0);
+  color: var(--accent);
 }
 .section-example-chip:disabled {
   opacity: 0.5;

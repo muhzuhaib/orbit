@@ -19,6 +19,7 @@ import {
   FolderIcon,
   MoonIcon,
   OrbitMark,
+  PanelLeftIcon,
   PlugIcon,
   SearchIcon,
   SettingsIcon,
@@ -85,6 +86,12 @@ export default function App() {
     window.api?.getVersion().then(setVersion)
   }, [])
 
+  // Keep the native title-bar overlay colours in sync with the app theme so the
+  // top window strip always matches the app body.
+  useEffect(() => {
+    window.api?.setTitlebarTheme?.(theme === 'dark')
+  }, [theme])
+
   const openConversation = (id: string) => {
     // force ChatsView to re-open even if the id matches a previous one
     setChatToOpen(null)
@@ -133,7 +140,7 @@ export default function App() {
           // sits at the bottom, matching its position in the full sidebar.
           <div className="nav-float nav-rail">
             <button className="nav-rail-btn nav-rail-toggle" onClick={toggleNav} title="Show sidebar">
-              ☰
+              <PanelLeftIcon />
             </button>
             <div className="nav-rail-items">
               {NAV.map((item) => {
@@ -158,7 +165,7 @@ export default function App() {
         ) : (
           <div className="nav-float">
             <button className="nav-show" onClick={toggleNav} title="Show sidebar">
-              ☰
+              <PanelLeftIcon />
             </button>
             <button
               className="nav-show nav-show-gear"
@@ -176,7 +183,7 @@ export default function App() {
             <span className="brand-word">Orbit</span>
           </div>
           <button className="nav-hide" onClick={toggleNav} title="Hide sidebar">
-            «
+            <PanelLeftIcon />
           </button>
         </div>
         <button

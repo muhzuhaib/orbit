@@ -25,6 +25,17 @@ function createWindow(): void {
     autoHideMenuBar: true,
     backgroundColor: '#1b1b1d',
     title: 'Orbit',
+    // Frameless with a themed overlay so the top strip matches the app body
+    // instead of the mismatched native OS title bar. The window controls
+    // (min/max/close) are drawn by the OS into the overlay; the rest of the top
+    // strip is app content with a CSS drag region. Colours are updated on theme
+    // change via the 'window:titlebar' IPC. (dark theme values by default.)
+    titleBarStyle: 'hidden',
+    titleBarOverlay: {
+      color: '#1b1b1d',
+      symbolColor: '#9a9aa2',
+      height: 40
+    },
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
       sandbox: false,

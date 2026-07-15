@@ -390,6 +390,16 @@ function SkillsSection() {
     refresh()
   }
 
+  const remove = async (s: SkillInfo) => {
+    const ok = await window.api.confirm(
+      `Remove skill “${s.name}”?`,
+      'This deletes the skill folder from Orbit. You can upload it again later.'
+    )
+    if (!ok) return
+    await window.api.skills.delete(s.id)
+    refresh()
+  }
+
   const upload = async () => {
     const result = await window.api.skills.upload()
     if (result) {
@@ -407,6 +417,13 @@ function SkillsSection() {
             <span className="model-id">{s.description}</span>
             <button className="ghost small" onClick={() => toggle(s)}>
               {s.enabled ? 'enabled ✓' : 'disabled'}
+            </button>
+            <button
+              className="ghost small danger"
+              title="Remove this skill from Orbit"
+              onClick={() => remove(s)}
+            >
+              Remove
             </button>
           </div>
         ))}

@@ -27,6 +27,10 @@ nsis:
   uninstallDisplayName: Orbit
   createDesktopShortcut: always
   oneClick: true
+  # Custom uninstall hook: asks whether to also delete user data (chats,
+  # projects, settings, API keys) so a clean reinstall is possible. Skipped
+  # during silent auto-update reinstalls. See build/installer.nsh.
+  include: build/installer.nsh
 # Auto-update feed: GitHub Releases. `npm run dist` emits latest.yml + a .blockmap
 # next to the installer; publishing those to github.com/muhzuhaib/orbit/releases
 # lets installed copies update themselves (electron-updater, see src/main/updater.ts).

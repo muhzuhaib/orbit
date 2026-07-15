@@ -48,6 +48,21 @@ import { writeFileSync } from 'fs'
 export function registerIpc(): void {
   ipcMain.handle('app:version', () => app.getVersion())
 
+  // Recolour the frameless title-bar overlay so its window controls match the
+  // current app theme (called by the renderer whenever the theme flips).
+  ipcMain.handle('window:titlebar', (e, dark: boolean) => {
+    const win = BrowserWindow.fromWebContents(e.sender)
+    try {
+      win?.setTitleBarOverlay({
+        color: dark ? '#1b1b1d' : '#ffffff',
+        symbolColor: dark ? '#9a9aa2' : '#61636f',
+        height: 40
+      })
+    } catch {
+      // setTitleBarOverlay is Windows-only / no-op if the frame isn't overlaid.
+    }
+  })
+
   // Native confirm dialog (clear Yes/Cancel) for destructive actions
   ipcMain.handle('ui:confirm', async (e, message: string, detail?: string) => {
     const win = BrowserWindow.fromWebContents(e.sender)
@@ -275,6 +290,7 @@ export function registerIpc(): void {
     skills.setSkillEnabled(id, enabled)
   )
   ipcMain.handle('skills:open-folder', () => skills.openSkillsFolder())
+  ipcMain.handle('skills:delete', (_e, id: string) => skills.deleteSkill(id))
   ipcMain.handle('skills:upload', async (e) => {
     const win = BrowserWindow.fromWebContents(e.sender)
     const result = await dialog.showOpenDialog(win!, {

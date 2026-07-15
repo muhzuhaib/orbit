@@ -25,6 +25,15 @@ export const ChatIcon = (p: P) => (
   </S>
 )
 
+// Sidebar toggle: a panel with a divided-off left column. Used for both the
+// hide (sidebar shown) and show (sidebar hidden) buttons.
+export const PanelLeftIcon = (p: P) => (
+  <S className={p.className}>
+    <rect x="3.5" y="4.5" width="17" height="15" rx="2.5" />
+    <path d="M9.5 4.5v15" />
+  </S>
+)
+
 export const FolderIcon = (p: P) => (
   <S className={p.className}>
     <path d="M3 6.5A1.5 1.5 0 0 1 4.5 5h4l2 2.5h7A1.5 1.5 0 0 1 19 9v8.5A1.5 1.5 0 0 1 17.5 19h-13A1.5 1.5 0 0 1 3 17.5V6.5Z" />

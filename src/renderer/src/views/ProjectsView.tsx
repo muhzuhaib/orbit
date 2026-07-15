@@ -57,6 +57,12 @@ export default function ProjectsView({
   }
 
   const remove = async (id: string) => {
+    const name = metas.find((p) => p.id === id)?.name || 'this project'
+    const ok = await window.api.confirm(
+      `Delete project “${name}”?`,
+      'This permanently removes the project, its instructions and attached files. This cannot be undone.'
+    )
+    if (!ok) return
     await window.api.projects.delete(id)
     if (project?.id === id) setProject(null)
     refresh()

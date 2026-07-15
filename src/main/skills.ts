@@ -57,6 +57,17 @@ export function openSkillsFolder(): void {
   shell.openPath(dir())
 }
 
+/**
+ * Permanently remove a skill folder. Also drops it from the disabled-set so a
+ * later skill re-imported under the same id starts enabled.
+ */
+export function deleteSkill(id: string): void {
+  if (/[\\/]|\.\./.test(id)) throw new Error('Invalid skill id')
+  rmSync(join(dir(), id), { recursive: true, force: true })
+  const disabled = new Set(getConfig().disabledSkills ?? [])
+  if (disabled.delete(id)) updateConfig({ disabledSkills: [...disabled] })
+}
+
 export function enabledSkills(): SkillInfo[] {
   return listSkills().filter((s) => s.enabled)
 }
