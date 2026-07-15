@@ -69,10 +69,21 @@ function createWindow(): void {
     if (mainWindow === win) mainWindow = null
   })
 
-  win.on('ready-to-show', () => {
+  // Show the window once, whichever trigger fires first. The normal path is
+  // 'ready-to-show'; but after an auto-update the installer-relaunched process
+  // sometimes never fires it, which used to leave Orbit running with a hidden
+  // window (looked like "the app won't open"). 'did-finish-load' and a timeout
+  // are belt-and-suspenders fallbacks so a window ALWAYS appears within a couple
+  // of seconds, on a fresh launch or a post-update relaunch alike.
+  const revealWindow = (): void => {
+    if (win.isDestroyed() || win.isVisible()) return
     win.maximize()
     win.show()
-  })
+    win.focus()
+  }
+  win.on('ready-to-show', revealWindow)
+  win.webContents.on('did-finish-load', revealWindow)
+  setTimeout(revealWindow, 3500)
 
   // Allow microphone access for voice dictation (Electron denies permission
   // requests by default). Only 'media' is granted; everything else stays denied.
